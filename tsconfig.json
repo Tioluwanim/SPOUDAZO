@@ -15,8 +15,6 @@
     "incremental": true,
     "plugins": [{ "name": "next" }],
 
-    "ignoreDeprecations": "6.0",
-
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"]
