@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+
+  --color-ink: 248 249 250;         /* #F8F9FA - page background */
+  --color-ink-soft: 255 255 255;    /* #FFFFFF - modal/panel background */
+  --color-ink-surface: 255 255 255; /* #FFFFFF - card background */
+  --color-ink-border: 216 222 232;  /* #D8DEE8 - borders, dividers */
+
+  --color-paper: 10 25 47;          /* #0A192F - headings, primary text */
+  --color-paper-dim: 74 90 114;     /* #4A5A72 - secondary text */
+  --color-paper-faint: 139 150 168; /* #8B96A8 - labels, meta text */
+
+  --grain-rgb: 10, 25, 47;          /* dark specks on the light background */
+}
+
+.dark {
+  color-scheme: dark;
+
+  --color-ink: 12 16 22;            /* near-black page background */
+  --color-ink-soft: 18 23 31;
+  --color-ink-surface: 22 27 36;
+  --color-ink-border: 42 50 63;
+
+  --color-paper: 240 242 245;       /* near-white primary text */
+  --color-paper-dim: 168 178 191;
+  --color-paper-faint: 106 118 134;
+
+  --grain-rgb: 240, 242, 245;       /* light specks on the dark background */
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-ink-border)) transparent;
+}
+
+body {
+  background-color: rgb(var(--color-ink));
+  color: rgb(var(--color-paper));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.grain-overlay {
+  background-image: radial-gradient(circle at 1px 1px, rgba(var(--grain-rgb), 0.05) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: 2px solid #00B4D8;
+  outline-offset: 3px;
+}
+
+::selection {
+  background: #FFD700;
+  color: #0A192F;
+}
