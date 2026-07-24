@@ -14,11 +14,11 @@ const base =
 
 const variants = {
   primary:
-    "bg-amber-glow text-white hover:bg-amber-deep hover:shadow-glow active:scale-[0.98]",
+    "bg-navy text-white hover:bg-navy/90 hover:shadow-glow active:scale-[0.98]",
   outline:
-    "border border-ink-border text-paper hover:border-amber-glow/60 hover:bg-ink-surface",
+    "border border-ink-border text-paper hover:border-navy/40 hover:bg-ink-surface",
   ghost: "text-paper-dim hover:text-paper hover:bg-ink-surface",
-  danger: "bg-clay-alert/90 text-white hover:bg-clay-alert",
+  danger: "bg-danger/90 text-white hover:bg-danger",
 };
 
 const sizes = {

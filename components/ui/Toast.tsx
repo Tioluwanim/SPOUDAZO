@@ -38,14 +38,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               exit={{ opacity: 0, x: 40 }}
               className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm shadow-xl backdrop-blur-md ${
                 item.tone === "success"
-                  ? "border-teal-mastery/40 bg-ink-surface text-paper"
-                  : "border-clay-alert/40 bg-ink-surface text-paper"
+                  ? "border-success/40 bg-ink-surface text-paper"
+                  : "border-danger/40 bg-ink-surface text-paper"
               }`}
             >
               {item.tone === "success" ? (
-                <CheckCircle2 size={16} className="text-teal-mastery shrink-0" />
+                <CheckCircle2 size={16} className="text-success shrink-0" />
               ) : (
-                <AlertCircle size={16} className="text-clay-alert shrink-0" />
+                <AlertCircle size={16} className="text-danger shrink-0" />
               )}
               {item.message}
             </motion.div>

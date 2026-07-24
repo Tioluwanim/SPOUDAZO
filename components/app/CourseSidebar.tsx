@@ -63,7 +63,7 @@ export function CourseSidebar({
       {/* ── Mobile / tablet: horizontal pill nav + collapsible topic list ── */}
       <div className="lg:hidden">
         <div className="mb-3">
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
             {course.code}
           </span>
           <h2 className="truncate font-display text-lg text-paper">{course.name}</h2>
@@ -77,7 +77,7 @@ export function CourseSidebar({
               className={clsx(
                 "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm transition-colors focus-ring",
                 link.active
-                  ? "border-amber-glow/50 bg-amber-glow/10 text-paper"
+                  ? "border-ai-accent/50 bg-ai-accent/10 text-paper"
                   : "border-ink-border text-paper-dim"
               )}
             >
@@ -111,7 +111,7 @@ export function CourseSidebar({
       {/* ── Desktop: always-visible vertical sidebar ── */}
       <aside className="hidden w-64 shrink-0 lg:block">
         <div className="mb-6">
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
             {course.code}
           </span>
           <h2 className="mt-1 truncate font-display text-lg text-paper">{course.name}</h2>
@@ -172,7 +172,7 @@ function TopicRow({
     >
       <span className="flex h-8 w-1.5 shrink-0 items-end overflow-hidden rounded-full bg-ink-border/60">
         <span
-          className={clsx("w-full rounded-full transition-all", isHot ? "bg-amber-glow" : "bg-paper-faint/60")}
+          className={clsx("w-full rounded-full transition-all", isHot ? "bg-ai-accent" : "bg-paper-faint/60")}
           style={{ height: `${pct}%` }}
         />
       </span>

@@ -6,7 +6,7 @@ export function ImpactStatement() {
   return (
     <section className="relative overflow-hidden bg-navy px-6 py-32">
       <div className="pointer-events-none absolute inset-0 grain-overlay opacity-[0.08]" />
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[900px] -translate-x-1/2 rounded-full bg-gold/10 blur-[160px]" />
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[900px] -translate-x-1/2 rounded-full bg-achievement/10 blur-[160px]" />
 
       <div className="relative mx-auto max-w-4xl text-center">
         <motion.p
@@ -28,7 +28,7 @@ export function ImpactStatement() {
         >
           You re-read everything equally.
           <br />
-          <span className="italic text-gold">Your exam doesn&apos;t.</span>
+          <span className="italic text-achievement">Your exam doesn&apos;t.</span>
         </motion.h2>
 
         <motion.div
@@ -50,7 +50,7 @@ export function ImpactStatement() {
 function Stat({ text, label }: { text: string; label: string }) {
   return (
     <div>
-      <span className="font-display text-2xl text-gold sm:text-3xl">{text}</span>
+      <span className="font-display text-2xl text-achievement sm:text-3xl">{text}</span>
       <p className="mt-2 text-sm leading-relaxed text-white/60">{label}</p>
     </div>
   );

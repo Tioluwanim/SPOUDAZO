@@ -86,7 +86,7 @@ export function FirstTimeWalkthrough({ onClose }: { onClose: () => void }) {
               animate={{ opacity: 1, scale: 1, rotate: 0 }}
               exit={{ opacity: 0, scale: 0.8 }}
               transition={{ duration: 0.35 }}
-              className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-gold/15 text-gold"
+              className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-achievement/15 text-achievement"
             >
               <Icon size={28} />
             </motion.div>
@@ -113,7 +113,7 @@ export function FirstTimeWalkthrough({ onClose }: { onClose: () => void }) {
                 key={i}
                 className={
                   i === step
-                    ? "h-1.5 w-5 rounded-full bg-amber-glow transition-all"
+                    ? "h-1.5 w-5 rounded-full bg-ai-accent transition-all"
                     : "h-1.5 w-1.5 rounded-full bg-ink-border transition-all"
                 }
               />

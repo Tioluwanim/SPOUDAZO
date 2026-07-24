@@ -98,7 +98,7 @@ function TopicPracticePageInner({
       }
     >
       <div className="mb-8">
-        <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+        <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
           frequency score · {topic.frequency_score}
         </span>
         <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">{topic.name}</h1>
@@ -175,7 +175,7 @@ function TabButton({
     >
       {children}
       {active && (
-        <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-amber-glow" />
+        <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-ai-accent" />
       )}
     </button>
   );

@@ -87,7 +87,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
       <button
         onClick={() => setOpen(true)}
         aria-label="Ask about your notes"
-        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-amber-glow text-white shadow-lg shadow-amber-glow/40 transition-transform hover:scale-105 focus-ring sm:bottom-6 sm:right-6"
+        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-ai-accent text-white shadow-lg shadow-ai-accent/40 transition-transform hover:scale-105 focus-ring sm:bottom-6 sm:right-6"
         style={{ display: open ? "none" : "flex" }}
       >
         <MessageCircle size={24} />
@@ -104,7 +104,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
           >
             <div className="flex items-center justify-between border-b border-ink-border bg-ink px-4 py-3">
               <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-glow/15 text-amber-glow">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ai-accent/15 text-ai-accent">
                   <MessageCircle size={16} />
                 </span>
                 <div>
@@ -124,7 +124,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
               {messages.length === 0 && (
                 <div className="flex h-full flex-col items-center justify-center text-center text-paper-faint">
-                  <BookOpen size={28} className="mb-2 text-amber-glow/60" />
+                  <BookOpen size={28} className="mb-2 text-ai-accent/60" />
                   <p className="text-sm">
                     Hey! Ask me anything about the material you&apos;ve uploaded — I&apos;m
                     happy to walk through it with you.
@@ -140,7 +140,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
                       <div
                         className={`rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
                           m.role === "user"
-                            ? "bg-amber-glow text-white"
+                            ? "bg-ai-accent text-white"
                             : "border border-ink-border bg-ink text-paper"
                         }`}
                       >
@@ -149,7 +149,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
                       {badge && BadgeIcon && (
                         <div
                           className={`mt-1.5 flex items-center gap-1 text-[11px] ${
-                            m.grounding === "notes" ? "text-teal-mastery" : "text-gold"
+                            m.grounding === "notes" ? "text-success" : "text-achievement"
                           }`}
                         >
                           <BadgeIcon size={11} />
@@ -190,7 +190,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
                   onClick={handleSend}
                   disabled={sending || !input.trim()}
                   aria-label="Send"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-glow text-white transition-opacity hover:bg-amber-deep disabled:opacity-40 focus-ring"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ai-accent text-white transition-opacity hover:bg-ai-accent-deep disabled:opacity-40 focus-ring"
                 >
                   <Send size={16} />
                 </button>

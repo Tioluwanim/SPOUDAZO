@@ -3,17 +3,17 @@ import clsx from "clsx";
 export function ProgressBar({
   value,
   max = 100,
-  tone = "amber",
+  tone = "achievement",
 }: {
   value: number;
   max?: number;
-  tone?: "amber" | "teal" | "clay";
+  tone?: "achievement" | "success" | "danger";
 }) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   const tones = {
-    amber: "bg-gold",
-    teal: "bg-teal-mastery",
-    clay: "bg-clay-alert",
+    achievement: "bg-achievement",
+    success: "bg-success",
+    danger: "bg-danger",
   };
   return (
     <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-border/60">

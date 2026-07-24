@@ -153,9 +153,9 @@ function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
           <span
             className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs ${
               timedOut
-                ? "border-clay-alert/50 text-clay-alert"
+                ? "border-danger/50 text-danger"
                 : secondsLeft <= 60 && timerStarted.current
-                ? "border-clay-alert/50 text-clay-alert"
+                ? "border-danger/50 text-danger"
                 : "border-ink-border text-paper-dim"
             }`}
           >
@@ -177,7 +177,7 @@ function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
       />
 
       {timedOut && !result && !answer.trim() && (
-        <p className="mt-2 text-sm text-clay-alert">Time&apos;s up — no answer was submitted.</p>
+        <p className="mt-2 text-sm text-danger">Time&apos;s up — no answer was submitted.</p>
       )}
 
       {!result && (
@@ -197,20 +197,20 @@ function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
           >
             <div className="mb-3 flex items-center justify-between">
               <span className="text-sm text-paper-dim">Score</span>
-              <span className="font-mono text-lg text-amber-glow">
+              <span className="font-mono text-lg text-ai-accent">
                 {result.score} / {result.max_score}
               </span>
             </div>
             {result.gaps.length > 0 ? (
               <div>
                 <p className="mb-2 flex items-center gap-1.5 text-sm text-paper-dim">
-                  <CircleAlert size={14} className="text-clay-alert" />
+                  <CircleAlert size={14} className="text-danger" />
                   What your answer missed
                 </p>
                 <ul className="space-y-2.5">
                   {result.gaps.map((gap, i) => (
                     <li key={i} className="flex gap-2 text-sm">
-                      <span className="mt-0.5 text-clay-alert">·</span>
+                      <span className="mt-0.5 text-danger">·</span>
                       <div>
                         <span className="font-medium text-paper">{gap.point}</span>
                         <p className="text-paper-dim">{gap.reason}</p>
@@ -220,7 +220,7 @@ function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
                 </ul>
               </div>
             ) : (
-              <p className="text-sm text-teal-mastery">Full marks — nothing missing.</p>
+              <p className="text-sm text-success">Full marks — nothing missing.</p>
             )}
           </motion.div>
         )}

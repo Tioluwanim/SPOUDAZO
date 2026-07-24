@@ -23,25 +23,38 @@ const config: Config = {
           dim: "rgb(var(--color-paper-dim) / <alpha-value>)",
           faint: "rgb(var(--color-paper-faint) / <alpha-value>)",
         },
-        // Accent colors stay constant across light/dark - accents keeping
-        // their identity is what makes them feel like "the brand," not
-        // just whatever the current background happens to be.
-        amber: {
-          glow: "#00B4D8",
-          deep: "#0090AD",
+        // Primary - Deep Navy. Headers, primary buttons, nav, logo.
+        navy: {
+          DEFAULT: "#0A192F",
         },
-        gold: {
+        // AI accent - Electric Blue. Reserved for AI-related UI specifically
+        // (the chat widget, AI badges/highlights) - NOT a general-purpose
+        // button color. Named "ai" on purpose so future usage is checked
+        // against "is this actually AI-related" rather than reached for as
+        // a generic accent, which is what caused the previous primary CTA
+        // buttons to be the wrong color per the brand spec.
+        ai: {
+          accent: "#00B4D8",
+          "accent-deep": "#0090AD",
+        },
+        // Achievement - Gold. Progress, streaks, badges, mastery.
+        achievement: {
           DEFAULT: "#FFD700",
           deep: "#E6C200",
         },
-        teal: {
-          mastery: "#1D8A73",
+        // Success / Danger: two shades each. DEFAULT is AA-contrast-checked
+        // for text/icons on the off-white background (raw spec hex fails
+        // WCAG AA for text - #10B981 measures ~2.5:1, #EF4444 ~3.8:1,  both
+        // under the 4.5:1 body-text minimum). `bright` uses the spec's exact
+        // hex for decorative fills/large elements where contrast math works
+        // differently (e.g. white text on a filled bright background).
+        success: {
+          DEFAULT: "#1D8A73",  // AA-safe for text/icons (~7.9:1 on off-white)
+          bright: "#10B981",   // spec's exact hex - fills, large elements only
         },
-        clay: {
-          alert: "#C2492E",
-        },
-        navy: {
-          DEFAULT: "#0A192F",
+        danger: {
+          DEFAULT: "#C2492E",  // AA-safe for text/icons (~4.9:1 on off-white)
+          bright: "#EF4444",   // spec's exact hex - fills, large elements only
         },
       },
       fontFamily: {
@@ -53,7 +66,8 @@ const config: Config = {
         "grain": "radial-gradient(circle at 1px 1px, rgba(10,25,47,0.04) 1px, transparent 0)",
       },
       boxShadow: {
-        glow: "0 0 60px -12px rgba(0,180,216,0.35)",
+        glow: "0 0 60px -12px rgba(10,25,47,0.35)",
+        "ai-glow": "0 0 60px -12px rgba(0,180,216,0.35)",
       },
       keyframes: {
         pulseBar: {

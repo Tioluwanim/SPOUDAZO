@@ -36,7 +36,7 @@ export function HowItWorks() {
           transition={{ duration: 0.6 }}
           className="mb-16 max-w-xl"
         >
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
             The pipeline
           </span>
           <h2 className="mt-3 font-display text-3xl text-paper sm:text-4xl">

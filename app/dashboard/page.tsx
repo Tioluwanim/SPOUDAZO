@@ -40,7 +40,7 @@ export default function DashboardPage() {
     <AppShell>
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
             Dashboard
           </span>
           <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">

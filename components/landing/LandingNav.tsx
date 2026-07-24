@@ -35,7 +35,7 @@ export function LandingNav() {
         <div className="flex items-center gap-3">
           <Link
             href="/signup"
-            className="rounded-full bg-amber-glow px-4 py-2 text-sm font-medium text-white transition-all hover:shadow-glow sm:px-5 sm:py-2.5"
+            className="rounded-full bg-navy px-4 py-2 text-sm font-medium text-white transition-all hover:shadow-glow sm:px-5 sm:py-2.5"
           >
             Start studying
           </Link>

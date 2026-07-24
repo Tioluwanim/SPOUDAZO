@@ -9,9 +9,9 @@ export function Badge({
 }) {
   const tones = {
     neutral: "bg-ink-border/60 text-paper-dim",
-    amber: "bg-amber-glow/15 text-amber-glow",
-    teal: "bg-teal-mastery/15 text-teal-mastery",
-    clay: "bg-clay-alert/15 text-clay-alert",
+    amber: "bg-ai-accent/15 text-ai-accent",
+    teal: "bg-success/15 text-success",
+    clay: "bg-danger/15 text-danger",
   };
   return (
     <span

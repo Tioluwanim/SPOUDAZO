@@ -14,17 +14,17 @@ export function CourseCard({ course, index = 0 }: { course: Course; index?: numb
       transition={{ duration: 0.4, delay: index * 0.05 }}
     >
       <Link href={`/courses/${course.id}`}>
-        <Card className="group p-6 transition-colors hover:border-amber-glow/50">
+        <Card className="group p-6 transition-colors hover:border-ai-accent/50">
           <div className="flex items-start justify-between">
             <div>
-              <p className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+              <p className="font-mono text-xs uppercase tracking-widest text-ai-accent">
                 {course.code}
               </p>
               <h3 className="mt-2 font-display text-xl text-paper">{course.name}</h3>
             </div>
             <ArrowUpRight
               size={18}
-              className="text-paper-faint transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-amber-glow"
+              className="text-paper-faint transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-ai-accent"
             />
           </div>
           <p className="mt-6 text-xs text-paper-faint">

@@ -51,7 +51,7 @@ export function SmartLibraryResources({ topicId }: { topicId: number }) {
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-ink-border px-3 py-1.5 text-xs text-paper-dim transition-colors hover:border-amber-glow/50 hover:text-paper focus-ring disabled:opacity-50"
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-ink-border px-3 py-1.5 text-xs text-paper-dim transition-colors hover:border-ai-accent/50 hover:text-paper focus-ring disabled:opacity-50"
         >
           <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
           {refreshing ? "Searching…" : "Find more"}
@@ -67,7 +67,7 @@ export function SmartLibraryResources({ topicId }: { topicId: number }) {
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="text-sm text-amber-glow hover:underline focus-ring"
+              className="text-sm text-ai-accent hover:underline focus-ring"
             >
               {refreshing ? "Searching…" : "Search now"}
             </button>
@@ -77,7 +77,7 @@ export function SmartLibraryResources({ topicId }: { topicId: number }) {
         <div className="space-y-3">
           {resources.map((r, i) => (
             <a key={i} href={r.url} target="_blank" rel="noopener noreferrer">
-              <Card className="p-4 transition-colors hover:border-amber-glow/40">
+              <Card className="p-4 transition-colors hover:border-ai-accent/40">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-paper">{r.title}</p>

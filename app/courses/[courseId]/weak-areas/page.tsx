@@ -59,7 +59,7 @@ export default function WeakAreasPage({ params }: { params: { courseId: string }
       sidebar={<CourseSidebar course={course} courseId={courseId} topics={topics} />}
     >
       <div className="mb-10">
-        <span className="font-mono text-xs uppercase tracking-widest text-clay-alert">
+        <span className="font-mono text-xs uppercase tracking-widest text-danger">
           Ranked by mastery
         </span>
         <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">
@@ -87,7 +87,7 @@ export default function WeakAreasPage({ params }: { params: { courseId: string }
               transition={{ duration: 0.35, delay: i * 0.04 }}
             >
               <Link href={`/courses/${courseId}/topics/${area.topic_id}`}>
-                <Card className="flex items-center gap-5 p-5 transition-colors hover:border-amber-glow/50">
+                <Card className="flex items-center gap-5 p-5 transition-colors hover:border-ai-accent/50">
                   <span className="font-mono text-xs text-paper-faint">
                     {String(i + 1).padStart(2, "0")}
                   </span>
@@ -96,7 +96,7 @@ export default function WeakAreasPage({ params }: { params: { courseId: string }
                     <div className="mt-2 max-w-xs">
                       <ProgressBar
                         value={area.mastery_score}
-                        tone={area.mastery_score < 40 ? "clay" : area.mastery_score < 70 ? "amber" : "teal"}
+                        tone={area.mastery_score < 40 ? "danger" : area.mastery_score < 70 ? "achievement" : "success"}
                       />
                     </div>
                   </div>

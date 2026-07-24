@@ -3,7 +3,18 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import clsx from "clsx";
-import { Sparkles, ChevronLeft, ChevronRight, Check, X, Clock } from "lucide-react";
+import {
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  X,
+  Clock,
+  ClipboardList,
+  ArrowLeft,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -23,6 +34,7 @@ export function CBTPractice({ topicId }: { topicId: number }) {
   const [answers, setAnswers] = useState<Record<number, CBTAttemptResult>>({});
   const [pending, setPending] = useState<Set<number>>(new Set());
   const [secondsLeft, setSecondsLeft] = useState(SECONDS_PER_QUESTION);
+  const [showSummary, setShowSummary] = useState(false);
   const { examMode } = useSettings();
   const { push } = useToast();
 
@@ -80,6 +92,9 @@ export function CBTPractice({ topicId }: { topicId: number }) {
     try {
       const result = await submitCbtAttempt(question.id, option);
       setAnswers((prev) => ({ ...prev, [question.id]: result }));
+      if (questions.indexOf(question) === questions.length - 1) {
+        setShowSummary(true);
+      }
     } catch (err) {
       push(err instanceof Error ? err.message : "Couldn't submit that answer", "error");
     } finally {
@@ -110,13 +125,88 @@ export function CBTPractice({ topicId }: { topicId: number }) {
 
   const question = questions[index];
   const answered = answers[question.id];
+  const answeredCount = Object.keys(answers).length;
   const correctCount = Object.values(answers).filter((a) => a.is_correct).length;
+
+  if (showSummary) {
+    const missed = questions.filter((q) => answers[q.id] && !answers[q.id].is_correct);
+    const got = questions.filter((q) => answers[q.id] && answers[q.id].is_correct);
+
+    return (
+      <div>
+        <button
+          onClick={() => setShowSummary(false)}
+          className="mb-5 flex items-center gap-1.5 text-sm text-paper-dim hover:text-paper focus-ring"
+        >
+          <ArrowLeft size={14} /> Back to questions
+        </button>
+
+        <Card className="mb-6 p-6 text-center">
+          <p className="font-display text-4xl text-paper">
+            {correctCount}/{answeredCount}
+          </p>
+          <p className="mt-1 text-sm text-paper-dim">correct on this set so far</p>
+        </Card>
+
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-success">
+              <TrendingUp size={14} /> Strengths ({got.length})
+            </p>
+            {got.length === 0 ? (
+              <p className="text-sm text-paper-faint">Nothing here yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {got.map((q) => (
+                  <li key={q.id} className="truncate rounded-lg border border-ink-border bg-ink-surface/40 px-3 py-2 text-sm text-paper-dim">
+                    {q.prompt}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-danger">
+              <TrendingDown size={14} /> Missed ({missed.length})
+            </p>
+            {missed.length === 0 ? (
+              <p className="text-sm text-paper-faint">None missed - nice.</p>
+            ) : (
+              <ul className="space-y-2">
+                {missed.map((q) => (
+                  <li key={q.id}>
+                    <button
+                      onClick={() => {
+                        setIndex(questions.indexOf(q));
+                        setShowSummary(false);
+                      }}
+                      className="w-full truncate rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-left text-sm text-paper-dim transition-colors hover:border-danger/50 focus-ring"
+                    >
+                      {q.prompt}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {missed.length > 0 && (
+          <p className="mt-6 rounded-xl border border-ai-accent/30 bg-ai-accent/5 px-4 py-3 text-sm text-paper-dim">
+            Worth a pass through Theory practice for this topic too — CBT tells you what you got
+            wrong, Theory practice explains why.
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
         <span className="font-mono text-xs text-paper-faint">
-          Question {index + 1} of {questions.length} · {correctCount} correct so far
+          Question {index + 1} of {questions.length} · {correctCount}/{answeredCount} correct so far
         </span>
         <div className="flex items-center gap-3">
           {examMode && (
@@ -124,7 +214,7 @@ export function CBTPractice({ topicId }: { topicId: number }) {
               className={clsx(
                 "flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-xs",
                 secondsLeft <= 10
-                  ? "border-clay-alert/50 text-clay-alert"
+                  ? "border-danger/50 text-danger"
                   : "border-ink-border text-paper-dim"
               )}
             >
@@ -132,6 +222,14 @@ export function CBTPractice({ topicId }: { topicId: number }) {
               {String(Math.floor(secondsLeft / 60)).padStart(1, "0")}:
               {String(secondsLeft % 60).padStart(2, "0")}
             </span>
+          )}
+          {answeredCount > 0 && (
+            <button
+              onClick={() => setShowSummary(true)}
+              className="flex items-center gap-1.5 rounded-full border border-ink-border px-2.5 py-1 text-xs text-paper-dim transition-colors hover:border-ai-accent/50 hover:text-paper focus-ring"
+            >
+              <ClipboardList size={12} /> Summary
+            </button>
           )}
           <Button size="sm" variant="outline" onClick={handleGenerate} loading={generating}>
             <Sparkles size={14} /> Generate 5 more
@@ -169,18 +267,18 @@ export function CBTPractice({ topicId }: { topicId: number }) {
                   disabled={!!answered || pending.has(question.id)}
                   className={clsx(
                     "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors focus-ring",
-                    !answered && "border-ink-border text-paper-dim hover:border-amber-glow/50 hover:text-paper",
-                    isSelectedCorrect && "border-teal-mastery bg-teal-mastery/10 text-paper",
-                    isSelectedWrong && "border-teal-mastery bg-teal-mastery/5 text-paper-dim",
-                    isWrongPick && "border-clay-alert/60 bg-clay-alert/5 text-paper-dim"
+                    !answered && "border-ink-border text-paper-dim hover:border-ai-accent/50 hover:text-paper",
+                    isSelectedCorrect && "border-success bg-success/10 text-paper",
+                    isSelectedWrong && "border-success bg-success/5 text-paper-dim",
+                    isWrongPick && "border-danger/60 bg-danger/5 text-paper-dim"
                   )}
                 >
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-current font-mono text-xs">
                     {key}
                   </span>
                   <span className="flex-1">{label}</span>
-                  {isSelectedCorrect && <Check size={16} className="text-teal-mastery" />}
-                  {isWrongPick && <X size={16} className="text-clay-alert" />}
+                  {isSelectedCorrect && <Check size={16} className="text-success" />}
+                  {isWrongPick && <X size={16} className="text-danger" />}
                 </button>
               );
             })}
@@ -193,8 +291,8 @@ export function CBTPractice({ topicId }: { topicId: number }) {
               className={clsx(
                 "mt-4 rounded-xl border p-4 text-sm",
                 answered.is_correct
-                  ? "border-teal-mastery/40 bg-teal-mastery/5 text-paper-dim"
-                  : "border-clay-alert/40 bg-clay-alert/5 text-paper-dim"
+                  ? "border-success/40 bg-success/5 text-paper-dim"
+                  : "border-danger/40 bg-danger/5 text-paper-dim"
               )}
             >
               <p className="mb-1 font-medium text-paper">

@@ -38,7 +38,7 @@ export function RegisterShowcase() {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.6 }}
         >
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
             Built for OAU, not translated for it
           </span>
           <h2 className="mt-3 font-display text-3xl text-paper sm:text-4xl">
@@ -57,7 +57,7 @@ export function RegisterShowcase() {
                 className={clsx(
                   "rounded-full border px-4 py-2 text-sm transition-colors focus-ring",
                   active === r.key
-                    ? "border-amber-glow bg-amber-glow/10 text-amber-glow"
+                    ? "border-ai-accent bg-ai-accent/10 text-ai-accent"
                     : "border-ink-border text-paper-dim hover:border-paper-faint"
                 )}
               >

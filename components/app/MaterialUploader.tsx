@@ -84,11 +84,11 @@ export function MaterialUploader({
         className={clsx(
           "flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-8 py-14 text-center transition-colors",
           dragOver
-            ? "border-amber-glow bg-amber-glow/5"
+            ? "border-ai-accent bg-ai-accent/5"
             : "border-ink-border hover:border-paper-faint"
         )}
       >
-        <UploadCloud size={28} className={dragOver ? "text-amber-glow" : "text-paper-faint"} />
+        <UploadCloud size={28} className={dragOver ? "text-ai-accent" : "text-paper-faint"} />
         <p className="mt-4 text-sm text-paper">
           Drag a PDF, DOCX, or past-questions file here
         </p>
@@ -117,13 +117,13 @@ export function MaterialUploader({
                 <FileText size={15} className="shrink-0 text-paper-faint" />
                 <span className="flex-1 truncate text-paper-dim">{file.name}</span>
                 {file.status === "uploading" && (
-                  <Loader2 size={15} className="animate-spin text-amber-glow" />
+                  <Loader2 size={15} className="animate-spin text-ai-accent" />
                 )}
                 {file.status === "done" && (
-                  <CheckCircle2 size={15} className="text-teal-mastery" />
+                  <CheckCircle2 size={15} className="text-success" />
                 )}
                 {file.status === "error" && (
-                  <span title={file.error} className="flex items-center gap-1 text-clay-alert">
+                  <span title={file.error} className="flex items-center gap-1 text-danger">
                     <XCircle size={15} />
                   </span>
                 )}

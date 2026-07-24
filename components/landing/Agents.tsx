@@ -41,7 +41,7 @@ export function Agents() {
           transition={{ duration: 0.6 }}
           className="mb-16 max-w-xl"
         >
-          <span className="font-mono text-xs uppercase tracking-widest text-teal-mastery">
+          <span className="font-mono text-xs uppercase tracking-widest text-success">
             Under the hood
           </span>
           <h2 className="mt-3 font-display text-3xl text-paper sm:text-4xl">
@@ -62,10 +62,10 @@ export function Agents() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-60px" }}
               transition={{ duration: 0.5, delay: i * 0.08 }}
-              className="group rounded-2xl border border-ink-border bg-ink-surface/60 p-7 transition-colors hover:border-amber-glow/40"
+              className="group rounded-2xl border border-ink-border bg-ink-surface/60 p-7 transition-colors hover:border-ai-accent/40"
             >
               <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-glow/10 text-amber-glow">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ai-accent/10 text-ai-accent">
                   <agent.icon size={19} />
                 </div>
                 <div>

@@ -79,7 +79,7 @@ export default function OnboardingPage() {
                 className={clsx(
                   "flex w-full flex-col rounded-xl border px-5 py-4 text-left transition-colors focus-ring",
                   register === r.key
-                    ? "border-amber-glow bg-amber-glow/10"
+                    ? "border-ai-accent bg-ai-accent/10"
                     : "border-ink-border hover:border-paper-faint"
                 )}
               >
@@ -133,7 +133,7 @@ export default function OnboardingPage() {
               key={i}
               className={clsx(
                 "h-1 flex-1 rounded-full transition-colors",
-                i <= step ? "bg-amber-glow" : "bg-ink-border"
+                i <= step ? "bg-ai-accent" : "bg-ink-border"
               )}
             />
           ))}
@@ -176,7 +176,7 @@ export default function OnboardingPage() {
 function StepHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div className="mb-6">
-      <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+      <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
         {eyebrow}
       </span>
       <h1 className="mt-2 font-display text-2xl text-paper">{title}</h1>

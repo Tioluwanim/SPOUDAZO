@@ -8,7 +8,7 @@ import { FrequencyPulse } from "./FrequencyPulse";
 export function ClosingCTA() {
   return (
     <section className="relative overflow-hidden border-t border-ink-border px-6 py-28">
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-glow/10 blur-[160px]" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-ai-accent/10 blur-[160px]" />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -26,7 +26,7 @@ export function ClosingCTA() {
         </p>
         <Link
           href="/signup"
-          className="group mt-9 inline-flex items-center gap-2 rounded-full bg-amber-glow px-8 py-4 font-medium text-white transition-all hover:shadow-glow"
+          className="group mt-9 inline-flex items-center gap-2 rounded-full bg-navy px-8 py-4 font-medium text-white transition-all hover:shadow-glow"
         >
           Get started free
           <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />

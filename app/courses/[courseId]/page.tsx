@@ -96,7 +96,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
       sidebar={<CourseSidebar course={course} courseId={courseId} topics={topics} />}
     >
       <div className="mb-10">
-        <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+        <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
           {course.code}
         </span>
         <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">{course.name}</h1>
@@ -105,7 +105,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_1.4fr]">
         <section>
           <h2 className="mb-4 flex items-center gap-2 font-display text-lg text-paper">
-            <Layers size={17} className="text-amber-glow" />
+            <Layers size={17} className="text-ai-accent" />
             Materials
           </h2>
           <MaterialUploader
@@ -122,7 +122,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
         <section>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-display text-lg text-paper">
-              <Sparkles size={17} className="text-amber-glow" />
+              <Sparkles size={17} className="text-ai-accent" />
               Topics
             </h2>
             <Button

@@ -37,7 +37,7 @@ export function ProfileMenu() {
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="Account menu"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-glow font-medium text-white transition-transform hover:scale-105 focus-ring"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-ai-accent font-medium text-white transition-transform hover:scale-105 focus-ring"
         >
           {initial}
         </button>
@@ -68,7 +68,7 @@ export function ProfileMenu() {
               </button>
               <button
                 onClick={handleSignOut}
-                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-paper-dim transition-colors hover:bg-clay-alert/10 hover:text-clay-alert focus-ring"
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-paper-dim transition-colors hover:bg-danger/10 hover:text-danger focus-ring"
               >
                 <LogOut size={15} />
                 Sign out
@@ -152,7 +152,7 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl px-2 py-3">
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-glow/10 text-amber-glow">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ai-accent/10 text-ai-accent">
           <Icon size={15} />
         </span>
         <div>
@@ -172,7 +172,7 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
       aria-checked={checked}
       onClick={() => onChange(!checked)}
       className={`relative h-6 w-11 shrink-0 rounded-full transition-colors focus-ring ${
-        checked ? "bg-amber-glow" : "bg-ink-border"
+        checked ? "bg-ai-accent" : "bg-ink-border"
       }`}
     >
       <span

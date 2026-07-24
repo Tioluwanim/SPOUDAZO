@@ -22,8 +22,8 @@ export function Hero() {
       {/* Ambient backdrop - moves slower than content on scroll */}
       <motion.div style={{ y: backdropY }} className="pointer-events-none absolute inset-0">
         <div className="grain-overlay absolute inset-0 opacity-40" />
-        <div className="absolute -top-40 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-amber-glow/10 blur-[140px]" />
-        <div className="absolute bottom-0 right-0 h-[420px] w-[420px] rounded-full bg-teal-mastery/10 blur-[120px]" />
+        <div className="absolute -top-40 left-1/2 h-[560px] w-[560px] -translate-x-1/2 rounded-full bg-ai-accent/10 blur-[140px]" />
+        <div className="absolute bottom-0 right-0 h-[420px] w-[420px] rounded-full bg-success/10 blur-[120px]" />
       </motion.div>
 
       <motion.div
@@ -37,7 +37,7 @@ export function Hero() {
             transition={{ duration: 0.6 }}
             className="mb-6 inline-flex items-center gap-2 rounded-full border border-ink-border bg-ink-surface/60 px-4 py-1.5 text-xs uppercase tracking-widest text-paper-dim"
           >
-            <BookOpen size={13} className="text-amber-glow" />
+            <BookOpen size={13} className="text-ai-accent" />
             Built at Obafemi Awolowo University
           </motion.div>
 
@@ -48,7 +48,7 @@ export function Hero() {
               </RevealLine>
             ))}
             <RevealLine delay={0.13}>
-              <span className="italic text-amber-glow">actually shows up</span>
+              <span className="italic text-ai-accent">actually shows up</span>
             </RevealLine>
             <RevealLine delay={0.21}>on the exam.</RevealLine>
           </h1>
@@ -73,14 +73,14 @@ export function Hero() {
           >
             <Link
               href="/signup"
-              className="group inline-flex items-center gap-2 rounded-full bg-amber-glow px-7 py-3.5 font-medium text-white transition-all hover:shadow-glow"
+              className="group inline-flex items-center gap-2 rounded-full bg-navy px-7 py-3.5 font-medium text-white transition-all hover:shadow-glow"
             >
               Start with your first course
               <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
             </Link>
             <a
               href="#how-it-works"
-              className="rounded-full border border-ink-border px-7 py-3.5 font-medium text-paper transition-colors hover:border-amber-glow/50"
+              className="rounded-full border border-ink-border px-7 py-3.5 font-medium text-paper transition-colors hover:border-ai-accent/50"
             >
               See how it works
             </a>
@@ -107,7 +107,7 @@ export function Hero() {
             <span className="font-mono text-xs uppercase tracking-widest text-paper-faint">
               CPE 316 · frequency scan
             </span>
-            <span className="h-2 w-2 rounded-full bg-teal-mastery" />
+            <span className="h-2 w-2 rounded-full bg-success" />
           </div>
           <FrequencyPulse className="h-24" />
           <div className="mt-5 space-y-2.5 border-t border-ink-border pt-4">
@@ -140,7 +140,7 @@ function Row({ label, score, hot }: { label: string; score: string; hot?: boolea
   return (
     <div className="flex items-center justify-between text-sm">
       <span className="text-paper-dim">{label}</span>
-      <span className={hot ? "font-mono text-xs text-amber-glow" : "font-mono text-xs text-paper-faint"}>
+      <span className={hot ? "font-mono text-xs text-ai-accent" : "font-mono text-xs text-paper-faint"}>
         {score}
       </span>
     </div>
