@@ -1,0 +1,28 @@
+2026-07-21 11:56:19 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 11:56:19 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 11:56:19 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 11:56:19 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 11:56:19 | INFO     | app.services.extraction_service:221 | ExtractionService initialised
+2026-07-21 18:52:37 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 18:52:37 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 18:52:37 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 18:52:37 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 18:52:37 | INFO     | app.services.extraction_service:221 | ExtractionService initialised
+2026-07-21 18:54:29 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 18:54:29 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 18:54:29 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 18:54:29 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 18:54:29 | INFO     | app.services.extraction_service:221 | ExtractionService initialised
+2026-07-21 23:45:24 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 23:45:24 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 23:45:24 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 23:45:24 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 23:45:49 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 23:45:49 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 23:45:49 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 23:45:49 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 23:49:06 | INFO     | app.services.ai_router:119 | AIRouter ready — OR model=openrouter/free  HF model=meta-llama/Llama-3.1-8B-Instruct:cerebras  HF url=https://router.huggingface.co/v1
+2026-07-21 23:49:06 | INFO     | app.services.pdf_service:46 | PDFService initialised
+2026-07-21 23:49:06 | INFO     | app.services.embedding_service:205 | EmbeddingService ready (model will load on first use)
+2026-07-21 23:49:06 | INFO     | app.services.rag_service:81 | RAGService initialised
+2026-07-21 23:49:06 | INFO     | app.services.extraction_service:221 | ExtractionService initialised
