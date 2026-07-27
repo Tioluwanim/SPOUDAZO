@@ -51,12 +51,19 @@ class PDFService:
         self,
         file_bytes: bytes,
         filename: str,
+        checksum: str | None = None,
     ) -> tuple[ProcessedDocument, None] | tuple[None, ErrorResponse]:
         """
         Validates and saves an uploaded file to disk.
         Supports: PDF, DOCX, DOC, TXT, XLSX, XLS, CSV.
         Non-PDF files are converted to a text-based PDF wrapper so the
         rest of the pipeline (extraction → embedding → RAG) works unchanged.
+
+        `checksum` (sha256 of the original upload bytes, computed by the
+        caller before any PDF conversion) is stored on the Document record
+        so a later upload of the same content can be recognised via
+        repository.get_ready_document_by_checksum() instead of re-running
+        extraction/embedding/indexing on identical material.
 
         Returns:
             (ProcessedDocument, None) on success.
@@ -167,7 +174,7 @@ class PDFService:
             mime_type      = "application/pdf",
             source_folder  = None,
             drive_file_id  = None,
-            checksum       = None,
+            checksum       = checksum,
             modified_time  = None,
             source         = "upload",
         )
