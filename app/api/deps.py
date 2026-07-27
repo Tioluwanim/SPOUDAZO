@@ -16,8 +16,10 @@ isn't yours, which leaks information. 404 gives no signal either way.
 
 from __future__ import annotations
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException
 
+from app.auth import get_current_user_id
+from app.config import ADMIN_USER_IDS
 from app.db.models import Course, Question, Topic
 from app.db.repository import repository
 
@@ -53,3 +55,14 @@ def require_study_plan_item_owner(item_id: int, user_id: str):
     if plan is None or plan.user_id != user_id:
         raise HTTPException(404, "Study plan item not found")
     return item
+
+
+def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
+    """Gate for feedback triage (list/update/delete) - anyone signed in can
+    submit feedback, but only reviewers listed in ADMIN_USER_IDS can see the
+    full queue. 403, not 404, is fine here (unlike the ownership helpers
+    above): admin status isn't tied to a specific resource, so there's
+    nothing about *this* endpoint's existence to leak."""
+    if user_id not in ADMIN_USER_IDS:
+        raise HTTPException(403, "Not authorized to manage feedback")
+    return user_id
