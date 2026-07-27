@@ -313,7 +313,7 @@ class Attempt(Base):
     question_id    = Column(Integer,     ForeignKey("questions.id", ondelete="CASCADE"),
                             index=True, nullable=False)
     student_answer = Column(Text,        nullable=False)
-    is_correct     = Column(String(8),   nullable=True)   # CBT only: "correct" | "incorrect"
+    is_correct     = Column(String(20),   nullable=True)   # CBT only: "correct" | "incorrect"
     score          = Column(Integer,     nullable=True)   # Theory only: points earned
     max_score      = Column(Integer,     nullable=True)   # Theory only: rubric point count
     gaps           = Column(JSON,        default=list, nullable=False)  # Theory only: missing rubric points
@@ -387,3 +387,37 @@ class TopicResource(Base):
     created_at     = Column(DateTime,    default=datetime.utcnow, nullable=False)
 
     topic = relationship("Topic")
+
+
+# =============================================================================
+# In-app feedback (bug reports, feature requests, etc.) — Phase 1 beta launch
+# =============================================================================
+
+
+class Feedback(Base):
+    """Student-submitted feedback captured in-app instead of via WhatsApp DM.
+
+    `metadata_json` holds everything auto-captured from the client so the
+    student never has to explain technical details themselves - route,
+    browser/OS, viewport, current course/topic/document if applicable,
+    app version, recent console errors/network failures, and the
+    session/request IDs a developer would otherwise have to ask for.
+    """
+    __tablename__ = "feedback"
+    __table_args__ = {"extend_existing": True}
+
+    id             = Column(Integer,      primary_key=True)
+    user_id        = Column(String(128),  index=True, nullable=False)
+    category       = Column(String(32),   nullable=False)   # bug | feature | performance | ai_response | ui_ux | study_plan | question_generation | other
+    title          = Column(String(256),  nullable=False)
+    description    = Column(Text,         nullable=False)
+    expected_behavior = Column(Text,      nullable=True)
+    actual_behavior   = Column(Text,      nullable=True)
+    severity       = Column(String(16),   default="medium", nullable=False)  # low | medium | high | critical
+    status         = Column(String(16),   default="new",    nullable=False, index=True)  # new | open | in_progress | resolved | closed
+    priority       = Column(String(16),   nullable=True)     # set by whoever triages - not student-supplied
+    screenshot_url = Column(String(1024), nullable=True)
+    metadata_json  = Column(JSON,         nullable=True)
+    created_at     = Column(DateTime,     default=datetime.utcnow, nullable=False, index=True)
+    updated_at     = Column(DateTime,     default=datetime.utcnow,
+                            onupdate=datetime.utcnow, nullable=False)
