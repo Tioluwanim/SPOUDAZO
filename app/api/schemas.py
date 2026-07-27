@@ -152,3 +152,39 @@ class TopicResourceOut(BaseModel):
     url: str
     snippet: str | None
     source_domain: str | None
+
+
+# ── Feedback ─────────────────────────────────────────────────────────────────
+
+class FeedbackCreate(BaseModel):
+    category: str            # bug | feature | performance | ai_response | ui_ux | study_plan | question_generation | other
+    title: str
+    description: str
+    expected_behavior: str | None = None
+    actual_behavior: str | None = None
+    severity: str = "medium"  # low | medium | high | critical
+    screenshot_url: str | None = None
+    metadata: dict = {}       # auto-captured client context (page, route, browser, etc.)
+
+
+class FeedbackUpdate(BaseModel):
+    status: str | None = None       # new | open | in_progress | resolved | closed
+    priority: str | None = None
+    severity: str | None = None
+
+
+class FeedbackOut(BaseModel):
+    id: int
+    reference_id: str        # e.g. "SPD-000152"
+    category: str
+    title: str
+    description: str
+    expected_behavior: str | None
+    actual_behavior: str | None
+    severity: str
+    status: str
+    priority: str | None
+    screenshot_url: str | None
+    metadata: dict
+    created_at: datetime
+    updated_at: datetime
