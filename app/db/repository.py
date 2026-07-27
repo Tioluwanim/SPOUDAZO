@@ -20,6 +20,7 @@ from app.db.models import (
     DocumentSection,
     DocumentVersion,
     ExportJob,
+    Feedback,
     IngestionJob,
     ProcessingLog,
     Question,
@@ -47,6 +48,15 @@ logger = get_logger(__name__)
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    # create_all only creates missing tables, never alters existing ones -
+    # this index backs the new checksum-dedup lookup (get_ready_document_by
+    # _checksum) and needs to appear on databases that already had a
+    # `documents` table before this column started being queried by it.
+    # checkfirst=True makes this safe to call on every startup.
+    from sqlalchemy import Index
+    Index("ix_documents_course_checksum", Document.course_id, Document.checksum).create(
+        bind=engine, checkfirst=True
+    )
 
 
 class Repository:
@@ -763,6 +773,62 @@ class Repository:
             stmt = select(Document.doc_id, Document.week_number).where(Document.course_id == course_id)
             return {doc_id: week for doc_id, week in session.execute(stmt).all()}
 
+    def list_materials_summary(self, course_id: int) -> list[dict]:
+        """One query, five columns - what the materials list view actually
+        needs. Replaces the old pattern of loading every doc_id then calling
+        pdf_service.load_document() per document, which round-tripped the
+        DB three times per document (Document + all its DocumentSections +
+        all its DocumentChunks) just to read a filename and a status badge -
+        an O(n) query storm that also deserialized full document text and
+        every chunk for documents nobody was reading text from on this
+        screen."""
+        with self.session() as session:
+            stmt = (
+                select(
+                    Document.doc_id,
+                    Document.filename,
+                    Document.status,
+                    Document.chunk_count,
+                    Document.week_number,
+                )
+                .where(Document.course_id == course_id)
+                .order_by(Document.week_number.is_(None), Document.week_number, Document.created_at)
+            )
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "doc_id": r.doc_id,
+                    "filename": r.filename,
+                    "status": r.status,
+                    "chunk_count": r.chunk_count,
+                    "week_number": r.week_number,
+                }
+                for r in rows
+            ]
+
+    def get_ready_document_by_checksum(self, course_id: int, checksum: str) -> Document | None:
+        """Finds an already-processed document with identical content in
+        this course, so a re-upload (double-click, retry after a refresh,
+        the same lecture note added twice) can be recognised and skipped
+        instead of re-extracting, re-embedding, and re-indexing content
+        that's already there. Scoped to READY documents only - a checksum
+        match against a still-processing or failed upload isn't something
+        we want to hand back as if it were done."""
+        with self.session() as session:
+            stmt = (
+                select(Document)
+                .where(
+                    Document.course_id == course_id,
+                    Document.checksum == checksum,
+                    Document.status == DocumentStatus.READY.value,
+                )
+                .order_by(Document.created_at.desc())
+            )
+            doc = session.execute(stmt).scalars().first()
+            if doc:
+                session.expunge(doc)
+            return doc
+
     # ── Topics ────────────────────────────────────────────────────────────────
 
     def bulk_create_topics(self, course_id: int, topics: list[dict]) -> list[Topic]:
@@ -1073,6 +1139,110 @@ class Repository:
                     source_domain=r.get("source_domain"),
                 ))
         return results
+
+    # ── Feedback ─────────────────────────────────────────────────────────────
+
+    def create_feedback(
+        self,
+        user_id: str,
+        category: str,
+        title: str,
+        description: str,
+        expected_behavior: str | None = None,
+        actual_behavior: str | None = None,
+        severity: str = "medium",
+        screenshot_url: str | None = None,
+        metadata: dict | None = None,
+    ) -> Feedback:
+        with self.session() as session:
+            fb = Feedback(
+                user_id=user_id,
+                category=category,
+                title=title,
+                description=description,
+                expected_behavior=expected_behavior,
+                actual_behavior=actual_behavior,
+                severity=severity,
+                screenshot_url=screenshot_url,
+                metadata_json=metadata or {},
+            )
+            session.add(fb)
+            session.flush()
+            session.refresh(fb)
+            session.expunge(fb)
+            return fb
+
+    def get_feedback(self, feedback_id: int) -> Feedback | None:
+        with self.session() as session:
+            fb = session.get(Feedback, feedback_id)
+            if fb:
+                session.expunge(fb)
+            return fb
+
+    def list_feedback(
+        self,
+        status: str | None = None,
+        priority: str | None = None,
+        category: str | None = None,
+        user_id: str | None = None,
+        search: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Feedback]:
+        with self.session() as session:
+            stmt = select(Feedback)
+            if status:
+                stmt = stmt.where(Feedback.status == status)
+            if priority:
+                stmt = stmt.where(Feedback.priority == priority)
+            if category:
+                stmt = stmt.where(Feedback.category == category)
+            if user_id:
+                stmt = stmt.where(Feedback.user_id == user_id)
+            if search:
+                like = f"%{search}%"
+                stmt = stmt.where((Feedback.title.ilike(like)) | (Feedback.description.ilike(like)))
+            if created_after:
+                stmt = stmt.where(Feedback.created_at >= created_after)
+            if created_before:
+                stmt = stmt.where(Feedback.created_at <= created_before)
+            stmt = stmt.order_by(Feedback.created_at.desc()).offset(offset).limit(limit)
+            rows = session.execute(stmt).scalars().all()
+            for r in rows:
+                session.expunge(r)
+            return rows
+
+    def update_feedback(
+        self,
+        feedback_id: int,
+        status: str | None = None,
+        priority: str | None = None,
+        severity: str | None = None,
+    ) -> Feedback | None:
+        with self.session() as session:
+            fb = session.get(Feedback, feedback_id)
+            if fb is None:
+                return None
+            if status is not None:
+                fb.status = status
+            if priority is not None:
+                fb.priority = priority
+            if severity is not None:
+                fb.severity = severity
+            session.flush()
+            session.refresh(fb)
+            session.expunge(fb)
+            return fb
+
+    def delete_feedback(self, feedback_id: int) -> bool:
+        with self.session() as session:
+            fb = session.get(Feedback, feedback_id)
+            if fb is None:
+                return False
+            session.delete(fb)
+            return True
 
 
 repository = Repository()
