@@ -18,9 +18,11 @@ import {
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { TaskProgress } from "@/components/ui/TaskProgress";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { useSettings } from "@/lib/settings";
+import { useTaskProgress } from "@/lib/useTaskProgress";
 import { generateCbtBatch, listCbtQuestions, submitCbtAttempt } from "@/lib/api";
 import type { CBTAttemptResult, CBTQuestion } from "@/lib/types";
 
@@ -29,7 +31,6 @@ const SECONDS_PER_QUESTION = 60;
 export function CBTPractice({ topicId }: { topicId: number }) {
   const [questions, setQuestions] = useState<CBTQuestion[]>([]);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, CBTAttemptResult>>({});
   const [pending, setPending] = useState<Set<number>>(new Set());
@@ -37,6 +38,7 @@ export function CBTPractice({ topicId }: { topicId: number }) {
   const [showSummary, setShowSummary] = useState(false);
   const { examMode } = useSettings();
   const { push } = useToast();
+  const generateTask = useTaskProgress("cbt_batch_generate", 20, "Generating CBT questions…");
 
   useEffect(() => {
     listCbtQuestions(topicId)
@@ -66,18 +68,10 @@ export function CBTPractice({ topicId }: { topicId: number }) {
   }, [examMode, index]);
 
   async function handleGenerate() {
-    setGenerating(true);
-    try {
-      const batch = await generateCbtBatch(topicId, 5);
+    const batch = await generateTask.run(() => generateCbtBatch(topicId, 5));
+    if (batch) {
       setQuestions((prev) => [...prev, ...batch]);
       setIndex(questions.length);
-    } catch (err) {
-      push(
-        err instanceof Error ? err.message : "Couldn't generate CBT questions for this topic",
-        "error"
-      );
-    } finally {
-      setGenerating(false);
     }
   }
 
@@ -110,16 +104,30 @@ export function CBTPractice({ topicId }: { topicId: number }) {
 
   if (questions.length === 0) {
     return (
-      <EmptyState
-        icon={Sparkles}
-        title="No CBT questions yet"
-        body="Generate a batch of multiple-choice questions grounded in this topic's source material."
-        action={
-          <Button onClick={handleGenerate} loading={generating}>
-            Generate 5 questions
-          </Button>
-        }
-      />
+      <div>
+        <EmptyState
+          icon={Sparkles}
+          title="No CBT questions yet"
+          body="Generate a batch of multiple-choice questions grounded in this topic's source material."
+          action={
+            <Button onClick={handleGenerate} loading={generateTask.status === "running"}>
+              Generate 5 questions
+            </Button>
+          }
+        />
+        {generateTask.status !== "idle" && (
+          <div className="mx-auto mt-4 max-w-xs">
+            <TaskProgress
+              status={generateTask.status}
+              step={generateTask.step}
+              progressPercent={generateTask.progressPercent}
+              etaLabel={generateTask.etaLabel}
+              errorMessage={generateTask.errorMessage}
+              onRetry={generateTask.retry}
+            />
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -231,11 +239,25 @@ export function CBTPractice({ topicId }: { topicId: number }) {
               <ClipboardList size={12} /> Summary
             </button>
           )}
-          <Button size="sm" variant="outline" onClick={handleGenerate} loading={generating}>
+          <Button size="sm" variant="outline" onClick={handleGenerate} loading={generateTask.status === "running"}>
             <Sparkles size={14} /> Generate 5 more
           </Button>
         </div>
       </div>
+
+      {generateTask.status !== "idle" && (
+        <div className="mb-4 max-w-xs">
+          <TaskProgress
+            status={generateTask.status}
+            step={generateTask.step}
+            progressPercent={generateTask.progressPercent}
+            etaLabel={generateTask.etaLabel}
+            errorMessage={generateTask.errorMessage}
+            onRetry={generateTask.retry}
+            compact
+          />
+        </div>
+      )}
 
       <motion.div
         key={question.id}
