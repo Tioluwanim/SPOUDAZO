@@ -40,7 +40,16 @@ export function MaterialUploader({
           prev.map((p) => (p.id === id ? { ...p, status: "done" } : p))
         );
         onUploaded(material);
-        push(`${file.name} processed — ${material.chunk_count} chunks indexed`);
+        // uploadMaterial() only confirms the file was saved - extraction and
+        // embedding still run in the background (see MaterialsList, which
+        // polls and shows real per-phase progress) - unless this exact file
+        // was already uploaded to this course before, in which case the
+        // backend recognised it by checksum and skipped reprocessing.
+        push(
+          material.status === "ready"
+            ? `${file.name} matches material already in this course — reusing it`
+            : `${file.name} uploaded — processing in the background`
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Upload failed";
         setPending((prev) =>
