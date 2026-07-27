@@ -12,8 +12,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from app.config import DEBUG
+from app.config import DEBUG, FEEDBACK_UPLOAD_DIR
 from app.db.repository import init_db
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Feedback screenshots are saved to disk (see app/api/feedback.py) and
+# served back from this same path - no separate object storage needed at
+# beta scale.
+app.mount("/feedback-uploads", StaticFiles(directory=str(FEEDBACK_UPLOAD_DIR)), name="feedback-uploads")
+
 
 @app.get("/health", tags=["Health"])
 async def health():
@@ -67,6 +73,7 @@ from app.api import (
     attempts,
     chat,
     courses,
+    feedback,
     materials,
     questions,
     resources,
@@ -83,3 +90,4 @@ app.include_router(chat.router)
 app.include_router(study_plan.router)
 app.include_router(study_plan.item_router)
 app.include_router(resources.router)
+app.include_router(feedback.router)
