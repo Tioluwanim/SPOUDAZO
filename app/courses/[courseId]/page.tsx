@@ -11,8 +11,10 @@ import { TopicCard } from "@/components/app/TopicCard";
 import { EmptyState } from "@/components/app/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { TaskProgress } from "@/components/ui/TaskProgress";
 import { useToast } from "@/components/ui/Toast";
 import { useRequireAuth } from "@/lib/auth";
+import { useTaskProgress } from "@/lib/useTaskProgress";
 import { getCourse, listMaterials, listTopics, extractTopics } from "@/lib/api";
 import type { Course, Material, Topic } from "@/lib/types";
 
@@ -25,7 +27,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
   const [materials, setMaterials] = useState<Material[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
-  const [extracting, setExtracting] = useState(false);
+  const extractTask = useTaskProgress("topic_extract", 20, "Extracting topics from your materials…");
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -60,20 +62,10 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
   const readyMaterials = materials.filter((m) => m.status === "ready").length;
 
   async function handleExtract() {
-    setExtracting(true);
-    try {
-      const result = await extractTopics(courseId);
+    const result = await extractTask.run(() => extractTopics(courseId));
+    if (result) {
       setTopics(result);
       push(`Found ${result.length} recurring topic${result.length === 1 ? "" : "s"}`);
-    } catch (err) {
-      push(
-        err instanceof Error
-          ? err.message
-          : "Couldn't extract topics — check that materials have finished processing",
-        "error"
-      );
-    } finally {
-      setExtracting(false);
     }
   }
 
@@ -129,12 +121,26 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
               size="sm"
               variant="outline"
               onClick={handleExtract}
-              loading={extracting}
+              loading={extractTask.status === "running"}
               disabled={readyMaterials === 0}
             >
               {topics.length > 0 ? "Re-scan for topics" : "Extract topics"}
             </Button>
           </div>
+
+          {extractTask.status !== "idle" && (
+            <div className="mb-4">
+              <TaskProgress
+                status={extractTask.status}
+                step={extractTask.step}
+                progressPercent={extractTask.progressPercent}
+                etaLabel={extractTask.etaLabel}
+                errorMessage={extractTask.errorMessage}
+                onRetry={extractTask.retry}
+                compact
+              />
+            </div>
+          )}
 
           {readyMaterials === 0 ? (
             <EmptyState
@@ -148,7 +154,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
               title="No topics extracted yet"
               body="Run the scan to count which topics recur across your uploaded past questions and materials."
               action={
-                <Button onClick={handleExtract} loading={extracting}>
+                <Button onClick={handleExtract} loading={extractTask.status === "running"}>
                   Extract topics
                 </Button>
               }
