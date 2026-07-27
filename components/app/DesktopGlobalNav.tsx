@@ -16,6 +16,7 @@ export function DesktopGlobalNav() {
           <Link
             key={item.href}
             href={item.href}
+            data-tour={item.tourId}
             className={clsx(
               "relative flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm transition-colors focus-ring",
               active ? "text-paper" : "text-paper-faint hover:text-paper-dim"
