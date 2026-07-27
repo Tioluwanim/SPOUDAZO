@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, BookOpen } from "lucide-react";
 import { AppShell } from "@/components/app/AppShell";
 import { CourseCard } from "@/components/app/CourseCard";
 import { CreateCourseModal } from "@/components/app/CreateCourseModal";
 import { EmptyState } from "@/components/app/EmptyState";
-import { FirstTimeWalkthrough, hasSeenWalkthrough } from "@/components/app/FirstTimeWalkthrough";
+import { Walkthrough, hasSeenWalkthrough } from "@/components/app/Walkthrough";
+import { DASHBOARD_WALKTHROUGH } from "@/lib/walkthrough";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
@@ -16,8 +18,18 @@ import { listCourses } from "@/lib/api";
 import type { Course } from "@/lib/types";
 
 export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardPageInner />
+    </Suspense>
+  );
+}
+
+function DashboardPageInner() {
   const { push } = useToast();
   const { user, loading: authLoading } = useRequireAuth();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -25,12 +37,21 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (authLoading || !user) return;
-    if (!hasSeenWalkthrough()) setShowWalkthrough(true);
+    // ?tour=1 lets the Profile page's "Replay walkthrough" link force the
+    // tour even after it's been dismissed once.
+    if (searchParams.get("tour") === "1" || !hasSeenWalkthrough()) {
+      setShowWalkthrough(true);
+    }
     listCourses()
       .then(setCourses)
       .catch((err) => push(err instanceof Error ? err.message : "Couldn't load courses", "error"))
       .finally(() => setLoading(false));
-  }, [authLoading, user, push]);
+  }, [authLoading, user, push, searchParams]);
+
+  function closeWalkthrough() {
+    setShowWalkthrough(false);
+    if (searchParams.get("tour") === "1") router.replace("/dashboard");
+  }
 
   if (authLoading || !user) return null;
 
@@ -47,7 +68,7 @@ export default function DashboardPage() {
             {profile?.name ? `Welcome back, ${profile.name}` : "Your courses"}
           </h1>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
+        <Button onClick={() => setModalOpen(true)} data-tour="add-course">
           <Plus size={16} /> Add course
         </Button>
       </div>
@@ -59,7 +80,11 @@ export default function DashboardPage() {
           icon={BookOpen}
           title="No courses yet"
           body="Add your first course, then upload lecture materials and past questions so Spoudazõ can start mining them for recurring topics."
-          action={<Button onClick={() => setModalOpen(true)}>Add your first course</Button>}
+          action={
+            <Button onClick={() => setModalOpen(true)} data-tour="add-course">
+              Add your first course
+            </Button>
+          }
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -76,7 +101,7 @@ export default function DashboardPage() {
       />
 
       {showWalkthrough && (
-        <FirstTimeWalkthrough onClose={() => setShowWalkthrough(false)} />
+        <Walkthrough steps={DASHBOARD_WALKTHROUGH} onClose={closeWalkthrough} />
       )}
     </AppShell>
   );
