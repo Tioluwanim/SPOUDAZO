@@ -22,6 +22,7 @@ DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 PROCESSED_DIR = DATA_DIR / "processed"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
+FEEDBACK_UPLOAD_DIR = DATA_DIR / "feedback"
 
 LOGS_DIR = BASE_DIR / "logs"
 
@@ -317,6 +318,7 @@ for directory in (
     UPLOAD_DIR,
     PROCESSED_DIR,
     VECTORSTORE_DIR,
+    FEEDBACK_UPLOAD_DIR,
     LOGS_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
@@ -329,6 +331,14 @@ APP_TITLE = _env_str("APP_TITLE", "PDF Research Analyzer")
 APP_VERSION = _env_str("APP_VERSION", "1.0.0")
 DEBUG = _env_bool("DEBUG", False)
 LOG_LEVEL = _env_str("LOG_LEVEL", "INFO").upper()
+
+# Firebase UIDs allowed to list/triage feedback (comma-separated). No roles
+# table exists yet, so this is the lightest thing that works for a beta with
+# a single reviewer (you) - revisit with a real roles system if the team
+# managing feedback grows past a handful of people.
+ADMIN_USER_IDS = {
+    uid.strip() for uid in _env_str("ADMIN_USER_IDS", "").split(",") if uid.strip()
+}
 
 # =============================================================================
 # STREAMLIT SETTINGS
@@ -764,6 +774,7 @@ __all__ = [
     "APP_VERSION",
     "DEBUG",
     "LOG_LEVEL",
+    "ADMIN_USER_IDS",
 
     # Streamlit
     "STREAMLIT_PAGE_TITLE",
