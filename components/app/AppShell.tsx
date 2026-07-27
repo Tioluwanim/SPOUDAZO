@@ -5,6 +5,7 @@ import { ReactNode } from "react";
 import { ProfileMenu } from "@/components/app/ProfileMenu";
 import { DesktopGlobalNav } from "@/components/app/DesktopGlobalNav";
 import { MobileBottomNav } from "@/components/app/MobileBottomNav";
+import { FeedbackButton } from "@/components/app/FeedbackButton";
 
 export function AppShell({
   crumbs,
@@ -62,6 +63,7 @@ export function AppShell({
       </div>
 
       <MobileBottomNav />
+      <FeedbackButton />
     </div>
   );
 }
