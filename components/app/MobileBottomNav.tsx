@@ -20,6 +20,7 @@ export function MobileBottomNav() {
             <Link
               key={item.href}
               href={item.href}
+              data-tour={item.tourId}
               className={clsx(
                 "flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] transition-colors focus-ring",
                 active ? "text-navy" : "text-paper-faint"
