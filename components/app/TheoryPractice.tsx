@@ -6,9 +6,11 @@ import { Sparkles, Send, CircleAlert, Clock } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { TaskProgress } from "@/components/ui/TaskProgress";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { useSettings } from "@/lib/settings";
+import { useTaskProgress } from "@/lib/useTaskProgress";
 import {
   generateTheoryQuestion,
   listTheoryQuestions,
@@ -21,8 +23,8 @@ const THEORY_SECONDS = 10 * 60; // 10 minutes per question, once the student sta
 export function TheoryPractice({ topicId }: { topicId: number }) {
   const [questions, setQuestions] = useState<TheoryQuestion[]>([]);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
   const { push } = useToast();
+  const generateTask = useTaskProgress("theory_question_generate", 10, "Generating theory question…");
 
   useEffect(() => {
     listTheoryQuestions(topicId)
@@ -32,28 +34,31 @@ export function TheoryPractice({ topicId }: { topicId: number }) {
   }, [topicId, push]);
 
   async function handleGenerate() {
-    setGenerating(true);
-    try {
-      const q = await generateTheoryQuestion(topicId);
-      setQuestions((prev) => [q, ...prev]);
-    } catch (err) {
-      push(
-        err instanceof Error ? err.message : "Couldn't generate a theory question for this topic",
-        "error"
-      );
-    } finally {
-      setGenerating(false);
-    }
+    const q = await generateTask.run(() => generateTheoryQuestion(topicId));
+    if (q) setQuestions((prev) => [q, ...prev]);
   }
 
   if (loading) return <Spinner label="Loading theory questions…" />;
 
   return (
     <div>
-      <div className="mb-5 flex justify-end">
-        <Button size="sm" variant="outline" onClick={handleGenerate} loading={generating}>
+      <div className="mb-5 flex flex-col items-end gap-2">
+        <Button size="sm" variant="outline" onClick={handleGenerate} loading={generateTask.status === "running"}>
           <Sparkles size={14} /> Generate question
         </Button>
+        {generateTask.status !== "idle" && (
+          <div className="w-full max-w-xs">
+            <TaskProgress
+              status={generateTask.status}
+              step={generateTask.step}
+              progressPercent={generateTask.progressPercent}
+              etaLabel={generateTask.etaLabel}
+              errorMessage={generateTask.errorMessage}
+              onRetry={generateTask.retry}
+              compact
+            />
+          </div>
+        )}
       </div>
 
       {questions.length === 0 ? (
@@ -62,7 +67,7 @@ export function TheoryPractice({ topicId }: { topicId: number }) {
           title="No theory questions yet"
           body="Generate one — it'll come with a rubric graded point-by-point against your answer."
           action={
-            <Button onClick={handleGenerate} loading={generating}>
+            <Button onClick={handleGenerate} loading={generateTask.status === "running"}>
               Generate question
             </Button>
           }
@@ -81,29 +86,16 @@ export function TheoryPractice({ topicId }: { topicId: number }) {
 function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState<TheoryAttemptResult | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(THEORY_SECONDS);
   const [timedOut, setTimedOut] = useState(false);
   const timerStarted = useRef(false);
   const { examMode } = useSettings();
-  const { push } = useToast();
+  const markingTask = useTaskProgress("theory_ai_marking", 8, "Evaluating answer…");
 
   async function handleSubmit() {
     if (!answer.trim()) return;
-    setSubmitting(true);
-    try {
-      const r = await submitTheoryAttempt(question.id, answer.trim());
-      setResult(r);
-    } catch (err) {
-      push(
-        err instanceof Error
-          ? err.message
-          : "Grading failed — the model returned an unparsable response, try again",
-        "error"
-      );
-    } finally {
-      setSubmitting(false);
-    }
+    const r = await markingTask.run(() => submitTheoryAttempt(question.id, answer.trim()));
+    if (r) setResult(r);
   }
 
   // Exam mode: the clock starts on the student's first keystroke for THIS
@@ -181,10 +173,23 @@ function TheoryQuestionCard({ question }: { question: TheoryQuestion }) {
       )}
 
       {!result && (
-        <div className="mt-3 flex justify-end">
-          <Button size="sm" onClick={handleSubmit} loading={submitting} disabled={!answer.trim()}>
+        <div className="mt-3 flex flex-col items-end gap-2">
+          <Button size="sm" onClick={handleSubmit} loading={markingTask.status === "running"} disabled={!answer.trim()}>
             <Send size={14} /> Submit answer
           </Button>
+          {markingTask.status !== "idle" && (
+            <div className="w-full max-w-xs">
+              <TaskProgress
+                status={markingTask.status}
+                step={markingTask.step}
+                progressPercent={markingTask.progressPercent}
+                etaLabel={markingTask.etaLabel}
+                errorMessage={markingTask.errorMessage}
+                onRetry={markingTask.retry}
+                compact
+              />
+            </div>
+          )}
         </div>
       )}
 
