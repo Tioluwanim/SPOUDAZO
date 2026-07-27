@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookOpen, User as UserIcon, Save } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, User as UserIcon, Save, PlayCircle } from "lucide-react";
 import { AppShell } from "@/components/app/AppShell";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -137,6 +138,25 @@ export default function ProfilePage() {
                 <p className="text-sm text-paper">Dark mode & exam mode</p>
                 <p className="text-xs text-paper-faint">Open via the account menu, top right</p>
               </div>
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-achievement/10 text-achievement">
+                  <PlayCircle size={17} />
+                </span>
+                <div>
+                  <p className="text-sm text-paper">Replay walkthrough</p>
+                  <p className="text-xs text-paper-faint">Re-run the guided tour of the app</p>
+                </div>
+              </div>
+              <Link href="/dashboard?tour=1">
+                <Button size="sm" variant="outline">
+                  Replay
+                </Button>
+              </Link>
             </div>
           </Card>
         </div>
