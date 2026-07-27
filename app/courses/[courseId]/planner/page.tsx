@@ -10,9 +10,11 @@ import { CourseChat } from "@/components/app/CourseChat";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { TaskProgress } from "@/components/ui/TaskProgress";
 import { EmptyState } from "@/components/app/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { useRequireAuth } from "@/lib/auth";
+import { useTaskProgress } from "@/lib/useTaskProgress";
 import {
   getCourse,
   listTopics,
@@ -31,7 +33,7 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
   const [topics, setTopics] = useState<Topic[]>([]);
   const [plan, setPlan] = useState<StudyPlan | null>(null);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
+  const createTask = useTaskProgress("study_plan_create", 15, "Building your revision schedule…");
 
   const [examDate, setExamDate] = useState("");
   const [hoursPerDay, setHoursPerDay] = useState(2);
@@ -50,9 +52,10 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
 
   async function handleCreatePlan() {
     if (!examDate) return;
-    setCreating(true);
-    try {
-      const newPlan = await createStudyPlan(courseId, new Date(examDate).toISOString(), hoursPerDay);
+    const newPlan = await createTask.run(() =>
+      createStudyPlan(courseId, new Date(examDate).toISOString(), hoursPerDay)
+    );
+    if (newPlan) {
       setPlan(newPlan);
       if (newPlan.compressed) {
         push(
@@ -60,10 +63,6 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
           "error"
         );
       }
-    } catch (err) {
-      push(err instanceof Error ? err.message : "Couldn't build a plan", "error");
-    } finally {
-      setCreating(false);
     }
   }
 
@@ -173,9 +172,20 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
                   again if there's time before your exam.
                 </p>
               </div>
-              <Button onClick={handleCreatePlan} loading={creating} disabled={!examDate} className="w-full">
+              <Button onClick={handleCreatePlan} loading={createTask.status === "running"} disabled={!examDate} className="w-full">
                 Build my plan
               </Button>
+              {createTask.status !== "idle" && (
+                <TaskProgress
+                  status={createTask.status}
+                  step={createTask.step}
+                  progressPercent={createTask.progressPercent}
+                  etaLabel={createTask.etaLabel}
+                  errorMessage={createTask.errorMessage}
+                  onRetry={createTask.retry}
+                  compact
+                />
+              )}
             </div>
           </Card>
         ) : (
