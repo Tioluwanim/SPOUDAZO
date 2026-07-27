@@ -1,23 +1,18 @@
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { ProgressBar } from "@/components/ui/ProgressBar";
 import type { Material } from "@/lib/types";
 
-const STATUS_TONE: Record<string, "amber" | "teal" | "clay" | "neutral"> = {
-  uploaded: "amber",
-  extracting: "amber",
-  extracted: "amber",
-  embedding: "amber",
-  ready: "teal",
-  failed: "clay",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  uploaded: "queued",
-  extracting: "extracting text",
-  extracted: "extracted",
-  embedding: "embedding",
-  ready: "ready",
-  failed: "failed",
+// Coarse phase → (label, progress%) - matches the real pipeline in
+// spoudazo-api's materials.py (uploaded -> extracting -> embedding -> ready),
+// not a simulation, since the backend genuinely reports these steps.
+// Percentages are fixed checkpoints rather than time-based, since we don't
+// know when a document entered its current phase from a poll response alone.
+const PHASE: Record<string, { label: string; percent: number; eta?: string }> = {
+  uploaded: { label: "Queued for processing…", percent: 8 },
+  extracting: { label: "Extracting text…", percent: 30, eta: "~3–8s" },
+  extracted: { label: "Text extracted — preparing to embed…", percent: 55 },
+  embedding: { label: "Generating embeddings & building search index…", percent: 78, eta: "~15–40s" },
 };
 
 function groupByWeek(materials: Material[]): [string, Material[]][] {
@@ -47,19 +42,42 @@ export function MaterialsList({ materials }: { materials: Material[] }) {
             {weekLabel}
           </p>
           <ul className="space-y-2">
-            {items.map((m) => (
-              <li
-                key={m.doc_id}
-                className="flex items-center gap-3 rounded-xl border border-ink-border bg-ink-surface/40 px-4 py-3 text-sm"
-              >
-                <FileText size={15} className="shrink-0 text-paper-faint" />
-                <span className="flex-1 truncate text-paper-dim">{m.filename}</span>
-                <span className="font-mono text-xs text-paper-faint">{m.chunk_count} chunks</span>
-                <Badge tone={STATUS_TONE[m.status] ?? "neutral"}>
-                  {STATUS_LABEL[m.status] ?? m.status}
-                </Badge>
-              </li>
-            ))}
+            {items.map((m) => {
+              const phase = PHASE[m.status];
+              return (
+                <li
+                  key={m.doc_id}
+                  className="rounded-xl border border-ink-border bg-ink-surface/40 px-4 py-3 text-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText size={15} className="shrink-0 text-paper-faint" />
+                    <span className="flex-1 truncate text-paper-dim">{m.filename}</span>
+                    {m.status === "ready" && (
+                      <span className="font-mono text-xs text-paper-faint">{m.chunk_count} chunks</span>
+                    )}
+                    <Badge tone={m.status === "ready" ? "teal" : m.status === "failed" ? "clay" : "amber"}>
+                      {m.status === "ready" ? "ready" : m.status === "failed" ? "failed" : "processing"}
+                    </Badge>
+                  </div>
+
+                  {phase && (
+                    <div className="mt-2.5 pl-[27px]">
+                      <div className="mb-1.5 flex items-center justify-between text-xs">
+                        <span className="text-paper-faint">{phase.label}</span>
+                        {phase.eta && <span className="text-paper-faint">{phase.eta}</span>}
+                      </div>
+                      <ProgressBar value={phase.percent} />
+                    </div>
+                  )}
+
+                  {m.status === "failed" && (
+                    <p className="mt-2 pl-[27px] text-xs text-danger">
+                      Processing failed — try removing and re-uploading this file.
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ))}
