@@ -20,6 +20,8 @@ becomes a real problem in practice.
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
 
 from app.api.deps import require_course_owner
@@ -89,7 +91,25 @@ async def upload_material(
     require_course_owner(course_id, user_id)
 
     file_bytes = await file.read()
-    doc, error = pdf_service.save_upload(file_bytes, file.filename)
+    checksum = hashlib.sha256(file_bytes).hexdigest()
+
+    # Same content already processed in this course (double-click, retry
+    # after a refresh, the same lecture note re-uploaded) - hand back the
+    # existing material instead of re-extracting/re-embedding/re-indexing
+    # content that's already there.
+    existing = repository.get_ready_document_by_checksum(course_id, checksum)
+    if existing:
+        logger.info("Upload for course %s matched existing document %s by checksum - skipping reprocessing",
+                    course_id, existing.doc_id)
+        return MaterialOut(
+            doc_id=existing.doc_id,
+            filename=existing.filename,
+            status=existing.status,
+            chunk_count=existing.chunk_count,
+            week_number=existing.week_number if week_number is None else week_number,
+        )
+
+    doc, error = pdf_service.save_upload(file_bytes, file.filename, checksum=checksum)
     if error:
         raise HTTPException(400, error.detail or error.error)
 
@@ -108,17 +128,17 @@ async def upload_material(
 @router.get("", response_model=list[MaterialOut])
 def list_materials(course_id: int, user_id: str = Depends(get_current_user_id)):
     require_course_owner(course_id, user_id)
-    doc_ids = repository.get_course_document_ids(course_id)
-    week_map = repository.get_document_week_map(course_id)
-    materials = []
-    for doc_id in doc_ids:
-        doc = pdf_service.load_document(doc_id)
-        if doc:
-            materials.append(MaterialOut(
-                doc_id=doc.doc_id,
-                filename=doc.filename,
-                status=doc.status.value,
-                chunk_count=doc.chunk_count,
-                week_number=week_map.get(doc_id),
-            ))
-    return materials
+    # One query for everything this view needs, instead of the previous
+    # per-document loop through pdf_service.load_document() (see
+    # repository.list_materials_summary for why that was expensive).
+    rows = repository.list_materials_summary(course_id)
+    return [
+        MaterialOut(
+            doc_id=r["doc_id"],
+            filename=r["filename"],
+            status=r["status"],
+            chunk_count=r["chunk_count"],
+            week_number=r["week_number"],
+        )
+        for r in rows
+    ]
