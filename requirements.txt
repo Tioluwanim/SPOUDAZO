@@ -19,6 +19,7 @@ numpy>=2.3.0
 requests>=2.32.0
 urllib3>=2.5.0
 certifi>=2025.0.0
+rank_bm25>=0.2.2
 
 transformers>=4.56.0
 huggingface-hub>=0.34.0
