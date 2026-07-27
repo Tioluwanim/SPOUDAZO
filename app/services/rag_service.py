@@ -65,6 +65,18 @@ def _get_faiss_module():
         ) from exc
 
 
+def _bm25_tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _get_bm25_class():
+    try:
+        from rank_bm25 import BM25Okapi
+        return BM25Okapi
+    except ImportError:
+        return None
+
+
 class RAGService:
     """
     Manages per-document FAISS indexes.
@@ -78,6 +90,13 @@ class RAGService:
     def __init__(self) -> None:
         self.vectorstore_dir = VECTORSTORE_DIR
         self._index_cache: dict[str, tuple[Any, list[TextChunk]]] = {}
+        # BM25 corpora, built lazily from the same chunks already loaded for
+        # FAISS (no separate index files on disk - a course's chunk count
+        # is small enough that rebuilding this in-memory is milliseconds,
+        # not worth persisting and keeping in sync separately). Keyed the
+        # same way as _index_cache (doc_id or "library") and invalidated
+        # at every point that invalidates _index_cache.
+        self._bm25_cache: dict[str, Any] = {}
         logger.info("RAGService initialised")
 
     # ── Index building ────────────────────────────────────────────────────────
@@ -103,6 +122,8 @@ class RAGService:
             )
             repository.save_chunks(doc.doc_id, doc.chunks, embeddings=embeddings)
             self._index_cache.pop("library", None)
+            self._bm25_cache.pop("library", None)
+            self._bm25_cache.pop(doc.doc_id, None)
 
             if embeddings.ndim != 2 or embeddings.size == 0:
                 raise ValueError("No embeddings were produced for this document")
@@ -312,9 +333,15 @@ class RAGService:
         if index is None or not chunks:
             return "", []
 
+        has_filters = bool(doc_ids or author or year or section_type or page_number is not None)
         all_results = self._multi_query_search(
             index=index, chunks=chunks, query=query,
             top_k=top_k, threshold=threshold, slog=slog,
+            # A filtered call builds an ad-hoc chunk subset each time (see
+            # _resolve_library_index) - caching BM25 under "library" for
+            # that would serve a stale/wrong corpus to the next unfiltered
+            # call, so only reuse the cache for the real, stable library index.
+            bm25_cache_key=None if has_filters else "library",
         )
         selected = self._mmr_select(all_results, index, top_k)
         return self._assemble_context(selected, max_chars, slog, with_doc_id=True)
@@ -393,6 +420,7 @@ class RAGService:
         all_results = self._multi_query_search(
             index=index, chunks=chunks, query=query,
             top_k=top_k, threshold=threshold, slog=slog,
+            bm25_cache_key=doc_id,
         )
         selected = self._mmr_select(all_results, index, top_k)
         return self._assemble_context(selected, max_chars, slog, with_doc_id=False)
@@ -407,12 +435,24 @@ class RAGService:
         top_k    : int,
         threshold: float,
         slog     : ServiceLogger,
+        bm25_cache_key: str | None = None,
     ) -> list[SearchResult]:
         """
         Runs query-expansion variants IN PARALLEL (ThreadPoolExecutor) and
         merges/deduplicates the results. Each variant does its own
         embed_query + FAISS search; these are independent so they parallelise
         cleanly. Falls back to threshold=0.0 if nothing clears the bar.
+
+        Also runs a BM25 keyword search over the same chunk corpus
+        (`bm25_cache_key` identifies which corpus - doc_id or "library";
+        None skips this step, e.g. for one-off filtered library searches
+        that don't have a stable corpus worth caching). Embeddings can
+        miss exact terminology matches - a specific formula name, an acronym,
+        a named theorem - that a keyword index catches directly; any chunk
+        BM25 surfaces that vector search didn't is added with its real
+        cosine similarity (via FAISS reconstruct) so it sits on the same
+        scale as every other candidate, rather than a separately-scaled
+        BM25 score that would distort the MMR/threshold logic downstream.
         """
         queries = self._expand_query(query)
         slog.debug("Multi-query variants (%d): %s", len(queries), queries)
@@ -468,10 +508,95 @@ class RAGService:
                         SearchResult(chunk=chunk, score=round(float(score), 4), rank=0)
                     )
 
+        self._add_bm25_candidates(
+            bm25_cache_key=bm25_cache_key, index=index, chunks=chunks, query=query,
+            top_k=top_k, threshold=threshold, seen_ids=seen_ids,
+            all_results=all_results, slog=slog,
+        )
+
         all_results.sort(key=lambda r: r.score, reverse=True)
         for i, r in enumerate(all_results):
             r.rank = i + 1
         return all_results
+
+    def _get_bm25(self, cache_key: str | None, chunks: list[TextChunk]):
+        """Lazily builds (and caches) a BM25 corpus over `chunks`. Returns
+        None if no cache key was given or rank_bm25 isn't installed -
+        callers treat that as "skip the keyword pass", not an error, since
+        vector-only search is still a fully functional fallback."""
+        if cache_key is None or not chunks:
+            return None
+        cached = self._bm25_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        bm25_cls = _get_bm25_class()
+        if bm25_cls is None:
+            return None
+        try:
+            corpus = [_bm25_tokenize(c.content) for c in chunks]
+            bm25 = bm25_cls(corpus)
+            self._bm25_cache[cache_key] = bm25
+            return bm25
+        except Exception:
+            return None
+
+    def _add_bm25_candidates(
+        self,
+        bm25_cache_key: str | None,
+        index: Any,
+        chunks: list[TextChunk],
+        query: str,
+        top_k: int,
+        threshold: float,
+        seen_ids: set[str],
+        all_results: list[SearchResult],
+        slog: ServiceLogger,
+    ) -> None:
+        bm25 = self._get_bm25(bm25_cache_key, chunks)
+        if bm25 is None:
+            return
+
+        tokens = _bm25_tokenize(query)
+        if not tokens:
+            return
+
+        try:
+            bm25_scores = bm25.get_scores(tokens)
+            bm25_top_n = min(top_k * 2, len(chunks))
+            top_positions = np.argsort(bm25_scores)[::-1][:bm25_top_n]
+            query_vec = embedding_service.embed_query(query)
+
+            added = 0
+            for pos in top_positions:
+                idx_int = int(pos)
+                if bm25_scores[idx_int] <= 0:
+                    break  # argsort is descending, so everything after is also 0
+                chunk = chunks[idx_int]
+                if chunk.chunk_id in seen_ids:
+                    continue
+
+                # Real cosine similarity, not a BM25 score, so this candidate
+                # sits on the same scale as every vector-search result -
+                # reconstruct works directly on IndexFlatIP (no direct-map
+                # needed) since it stores raw vectors.
+                vec = index.reconstruct(idx_int)
+                cos_sim = float(np.dot(vec, query_vec.flatten()))
+
+                # A keyword hit with very low semantic similarity is more
+                # likely shared boilerplate (e.g. a running header) than a
+                # genuinely relevant chunk - require at least half the usual
+                # bar rather than including every keyword match unfiltered.
+                if cos_sim < threshold * 0.5:
+                    continue
+
+                seen_ids.add(chunk.chunk_id)
+                all_results.append(SearchResult(chunk=chunk, score=round(cos_sim, 4), rank=0))
+                added += 1
+
+            if added:
+                slog.debug("BM25 keyword search added %d chunk(s) vector search missed", added)
+        except Exception as e:
+            slog.warning("BM25 hybrid search skipped: %s", e)
 
     def _mmr_select(
         self,
@@ -586,6 +711,8 @@ class RAGService:
         index_dir = self._index_dir(doc_id)
         self._index_cache.pop(doc_id, None)
         self._index_cache.pop("library", None)
+        self._bm25_cache.pop(doc_id, None)
+        self._bm25_cache.pop("library", None)
         if index_dir.exists():
             shutil.rmtree(index_dir)
             logger.info("[%s] FAISS index deleted", doc_id)
