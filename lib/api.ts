@@ -4,6 +4,9 @@ import type {
   ChatTurn,
   Course,
   CourseChatResponse,
+  Feedback,
+  FeedbackCategory,
+  FeedbackSeverity,
   Material,
   StudyPlan,
   TheoryAttemptResult,
@@ -190,5 +193,42 @@ export function getTopicResources(topicId: number) {
 export function refreshTopicResources(topicId: number) {
   return request<TopicResource[]>(`/topics/${topicId}/resources/refresh`, {
     method: "POST",
+  });
+}
+
+// ── Feedback ─────────────────────────────────────────────────────────────
+
+export async function uploadFeedbackScreenshot(blob: Blob): Promise<string> {
+  const token = await getIdToken();
+  if (!token) throw new ApiRequestError(401, "You're signed out. Please sign in again.");
+
+  const form = new FormData();
+  form.append("file", blob, "screenshot.png");
+
+  const res = await fetch(`${BASE_URL}/feedback/screenshot`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    throw new ApiRequestError(res.status, "Couldn't upload the screenshot");
+  }
+  const data = await res.json();
+  return data.screenshot_url as string;
+}
+
+export function submitFeedback(payload: {
+  category: FeedbackCategory;
+  title: string;
+  description: string;
+  expected_behavior?: string;
+  actual_behavior?: string;
+  severity: FeedbackSeverity;
+  screenshot_url?: string | null;
+  metadata: Record<string, unknown>;
+}) {
+  return request<Feedback>("/feedback", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
