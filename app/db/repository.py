@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -11,6 +11,7 @@ from sqlalchemy import inspect, select, func, text
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
+    Annotation,
     Attempt,
     ChatMessage,
     ChatSession,
@@ -20,10 +21,13 @@ from app.db.models import (
     DocumentSection,
     DocumentVersion,
     ExportJob,
+    Favorite,
     Feedback,
     IngestionJob,
     ProcessingLog,
     Question,
+    ReadingActivityDay,
+    ReadingProgress,
     StudyPlan,
     StudyPlanItem,
     SyncRun,
@@ -1243,6 +1247,226 @@ class Repository:
                 return False
             session.delete(fb)
             return True
+
+    # ── Annotations (highlights & bookmarks) ────────────────────────────────
+
+    def create_annotation(
+        self, user_id: str, doc_id: str, kind: str, section_index: int,
+        quote: str, note: str | None = None,
+    ) -> Annotation:
+        with self.session() as session:
+            ann = Annotation(
+                user_id=user_id, doc_id=doc_id, kind=kind,
+                section_index=section_index, quote=quote, note=note,
+            )
+            session.add(ann)
+            session.flush()
+            session.refresh(ann)
+            session.expunge(ann)
+            return ann
+
+    def list_annotations(self, user_id: str, doc_id: str, kind: str | None = None) -> list[Annotation]:
+        with self.session() as session:
+            stmt = select(Annotation).where(Annotation.user_id == user_id, Annotation.doc_id == doc_id)
+            if kind:
+                stmt = stmt.where(Annotation.kind == kind)
+            stmt = stmt.order_by(Annotation.section_index, Annotation.created_at)
+            rows = session.execute(stmt).scalars().all()
+            for r in rows:
+                session.expunge(r)
+            return rows
+
+    def list_bookmarks_for_user(self, user_id: str, limit: int = 50) -> list[Annotation]:
+        """Cross-course bookmark list for the Smart Library sidebar."""
+        with self.session() as session:
+            stmt = (
+                select(Annotation)
+                .where(Annotation.user_id == user_id, Annotation.kind == "bookmark")
+                .order_by(Annotation.created_at.desc())
+                .limit(limit)
+            )
+            rows = session.execute(stmt).scalars().all()
+            for r in rows:
+                session.expunge(r)
+            return rows
+
+    def get_annotation(self, annotation_id: int) -> Annotation | None:
+        with self.session() as session:
+            ann = session.get(Annotation, annotation_id)
+            if ann:
+                session.expunge(ann)
+            return ann
+
+    def delete_annotation(self, annotation_id: int) -> bool:
+        with self.session() as session:
+            ann = session.get(Annotation, annotation_id)
+            if ann is None:
+                return False
+            session.delete(ann)
+            return True
+
+    # ── Favorites ────────────────────────────────────────────────────────────
+
+    def toggle_favorite(self, user_id: str, doc_id: str) -> bool:
+        """Returns the new state (True = now favorited)."""
+        with self.session() as session:
+            stmt = select(Favorite).where(Favorite.user_id == user_id, Favorite.doc_id == doc_id)
+            existing = session.execute(stmt).scalar_one_or_none()
+            if existing:
+                session.delete(existing)
+                return False
+            session.add(Favorite(user_id=user_id, doc_id=doc_id))
+            return True
+
+    def is_favorited(self, user_id: str, doc_id: str) -> bool:
+        with self.session() as session:
+            stmt = select(Favorite.id).where(Favorite.user_id == user_id, Favorite.doc_id == doc_id)
+            return session.execute(stmt).scalar_one_or_none() is not None
+
+    def list_favorite_doc_ids(self, user_id: str) -> list[str]:
+        with self.session() as session:
+            stmt = select(Favorite.doc_id).where(Favorite.user_id == user_id).order_by(Favorite.created_at.desc())
+            return [row[0] for row in session.execute(stmt).all()]
+
+    # ── Reading progress ─────────────────────────────────────────────────────
+
+    def upsert_reading_progress(
+        self, user_id: str, doc_id: str, last_section_index: int, progress_percent: int,
+    ) -> ReadingProgress:
+        with self.session() as session:
+            stmt = select(ReadingProgress).where(
+                ReadingProgress.user_id == user_id, ReadingProgress.doc_id == doc_id
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                row = ReadingProgress(
+                    user_id=user_id, doc_id=doc_id,
+                    last_section_index=last_section_index, progress_percent=progress_percent,
+                )
+                session.add(row)
+            else:
+                row.last_section_index = last_section_index
+                row.progress_percent = progress_percent
+            session.flush()
+            session.refresh(row)
+            session.expunge(row)
+            return row
+
+    def get_reading_progress(self, user_id: str, doc_id: str) -> ReadingProgress | None:
+        with self.session() as session:
+            stmt = select(ReadingProgress).where(
+                ReadingProgress.user_id == user_id, ReadingProgress.doc_id == doc_id
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row:
+                session.expunge(row)
+            return row
+
+    def list_recent_documents(self, user_id: str, limit: int = 10) -> list[dict]:
+        """Recently-viewed documents across every course, joined against
+        Document in one query for what the sidebar actually needs (no
+        second round trip per document to fetch its filename)."""
+        with self.session() as session:
+            stmt = (
+                select(
+                    Document.doc_id, Document.filename, Document.course_id,
+                    ReadingProgress.progress_percent, ReadingProgress.last_viewed_at,
+                )
+                .join(Document, Document.doc_id == ReadingProgress.doc_id)
+                .where(ReadingProgress.user_id == user_id)
+                .order_by(ReadingProgress.last_viewed_at.desc())
+                .limit(limit)
+            )
+            rows = session.execute(stmt).all()
+            return [
+                {
+                    "doc_id": r.doc_id,
+                    "filename": r.filename,
+                    "course_id": r.course_id,
+                    "progress_percent": r.progress_percent,
+                    "last_viewed_at": r.last_viewed_at,
+                }
+                for r in rows
+            ]
+
+    # ── Reading activity & analytics ────────────────────────────────────────
+
+    def record_reading_activity(self, user_id: str, seconds_delta: int) -> None:
+        """Upserts today's row, adding seconds_delta - called alongside every
+        reading-progress save. Silently no-ops on a non-positive delta rather
+        than erroring, since a duplicate/late progress save with 0 new
+        seconds is a normal occurrence, not a client bug."""
+        if seconds_delta <= 0:
+            return
+        today = datetime.utcnow().date()
+        with self.session() as session:
+            stmt = select(ReadingActivityDay).where(
+                ReadingActivityDay.user_id == user_id,
+                ReadingActivityDay.activity_date == today,
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                session.add(ReadingActivityDay(user_id=user_id, activity_date=today, seconds_read=seconds_delta))
+            else:
+                row.seconds_read += seconds_delta
+
+    def get_reading_stats(self, user_id: str) -> dict:
+        """Everything the Smart Library analytics dashboard needs, in one
+        pass per table rather than N queries - none of these numbers are
+        large enough per user to justify more elaborate aggregation."""
+        with self.session() as session:
+            activity_rows = session.execute(
+                select(ReadingActivityDay.activity_date, ReadingActivityDay.seconds_read)
+                .where(ReadingActivityDay.user_id == user_id)
+                .order_by(ReadingActivityDay.activity_date.desc())
+            ).all()
+
+            total_seconds = sum(r.seconds_read for r in activity_rows)
+            active_dates = {r.activity_date for r in activity_rows}
+
+            # Streak = consecutive days ending today or yesterday (so a
+            # student who read last night and hasn't opened the app yet
+            # today doesn't see their streak reset to 0 at midnight).
+            streak = 0
+            cursor = datetime.utcnow().date()
+            if cursor not in active_dates:
+                cursor = cursor - timedelta(days=1)
+            while cursor in active_dates:
+                streak += 1
+                cursor = cursor - timedelta(days=1)
+
+            documents_started = session.execute(
+                select(func.count()).select_from(ReadingProgress).where(ReadingProgress.user_id == user_id)
+            ).scalar_one()
+            documents_completed = session.execute(
+                select(func.count()).select_from(ReadingProgress).where(
+                    ReadingProgress.user_id == user_id, ReadingProgress.progress_percent >= 95,
+                )
+            ).scalar_one()
+            highlight_count = session.execute(
+                select(func.count()).select_from(Annotation).where(
+                    Annotation.user_id == user_id, Annotation.kind == "highlight",
+                )
+            ).scalar_one()
+            bookmark_count = session.execute(
+                select(func.count()).select_from(Annotation).where(
+                    Annotation.user_id == user_id, Annotation.kind == "bookmark",
+                )
+            ).scalar_one()
+            favorite_count = session.execute(
+                select(func.count()).select_from(Favorite).where(Favorite.user_id == user_id)
+            ).scalar_one()
+
+            return {
+                "total_seconds_read": total_seconds,
+                "active_days": len(active_dates),
+                "current_streak_days": streak,
+                "documents_started": documents_started,
+                "documents_completed": documents_completed,
+                "highlight_count": highlight_count,
+                "bookmark_count": bookmark_count,
+                "favorite_count": favorite_count,
+            }
 
 
 repository = Repository()
