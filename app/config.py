@@ -23,6 +23,7 @@ UPLOAD_DIR = DATA_DIR / "uploads"
 PROCESSED_DIR = DATA_DIR / "processed"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
 FEEDBACK_UPLOAD_DIR = DATA_DIR / "feedback"
+THUMBNAIL_DIR = DATA_DIR / "thumbnails"
 
 LOGS_DIR = BASE_DIR / "logs"
 
@@ -319,6 +320,7 @@ for directory in (
     PROCESSED_DIR,
     VECTORSTORE_DIR,
     FEEDBACK_UPLOAD_DIR,
+    THUMBNAIL_DIR,
     LOGS_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
@@ -767,6 +769,8 @@ __all__ = [
     "UPLOAD_DIR",
     "PROCESSED_DIR",
     "VECTORSTORE_DIR",
+    "FEEDBACK_UPLOAD_DIR",
+    "THUMBNAIL_DIR",
     "LOGS_DIR",
 
     # App
