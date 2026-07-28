@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, ForeignKey,
-    Integer, LargeBinary, String, Text,
+    JSON, Boolean, Column, Date, DateTime, ForeignKey,
+    Integer, LargeBinary, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -313,7 +313,7 @@ class Attempt(Base):
     question_id    = Column(Integer,     ForeignKey("questions.id", ondelete="CASCADE"),
                             index=True, nullable=False)
     student_answer = Column(Text,        nullable=False)
-    is_correct     = Column(String(20),   nullable=True)   # CBT only: "correct" | "incorrect"
+    is_correct     = Column(String(8),   nullable=True)   # CBT only: "correct" | "incorrect"
     score          = Column(Integer,     nullable=True)   # Theory only: points earned
     max_score      = Column(Integer,     nullable=True)   # Theory only: rubric point count
     gaps           = Column(JSON,        default=list, nullable=False)  # Theory only: missing rubric points
@@ -421,3 +421,85 @@ class Feedback(Base):
     created_at     = Column(DateTime,     default=datetime.utcnow, nullable=False, index=True)
     updated_at     = Column(DateTime,     default=datetime.utcnow,
                             onupdate=datetime.utcnow, nullable=False)
+
+
+# =============================================================================
+# Smart Library reader — annotations, favorites, reading progress
+# =============================================================================
+
+
+class Annotation(Base):
+    """A highlight or a bookmark, anchored to one section of one document.
+    Both share the same shape (a quoted span of text, optionally with a
+    note) - splitting them into two tables would just mean duplicating
+    every query. `kind` is the only thing that distinguishes them."""
+    __tablename__ = "annotations"
+    __table_args__ = {"extend_existing": True}
+
+    id             = Column(Integer,      primary_key=True)
+    user_id        = Column(String(128),  index=True, nullable=False)
+    doc_id         = Column(String(36),   ForeignKey("documents.doc_id", ondelete="CASCADE"),
+                            index=True, nullable=False)
+    kind           = Column(String(16),   nullable=False, index=True)  # highlight | bookmark
+    section_index  = Column(Integer,      nullable=False)   # index into ProcessedDocument.sections
+    quote          = Column(Text,         nullable=False)   # the selected text itself
+    note           = Column(Text,         nullable=True)     # optional student note (bookmarks mainly)
+    created_at     = Column(DateTime,     default=datetime.utcnow, nullable=False, index=True)
+
+
+class Favorite(Base):
+    """Whole-document favoriting - coarser than a bookmark (which marks a
+    passage within a document), so it's its own tiny table rather than an
+    Annotation with no section_index."""
+    __tablename__ = "favorites"
+    __table_args__ = (
+        UniqueConstraint("user_id", "doc_id", name="uq_favorites_user_doc"),
+        {"extend_existing": True},
+    )
+
+    id             = Column(Integer,      primary_key=True)
+    user_id        = Column(String(128),  index=True, nullable=False)
+    doc_id         = Column(String(36),   ForeignKey("documents.doc_id", ondelete="CASCADE"),
+                            index=True, nullable=False)
+    created_at     = Column(DateTime,     default=datetime.utcnow, nullable=False)
+
+
+class ReadingProgress(Base):
+    """One row per (user, document) - upserted as the student reads.
+    Backs three things at once: "Recent Documents" (sort by last_viewed_at),
+    resuming where they left off (last_section_index), and the reading
+    progress indicator surviving a refresh (progress_percent) instead of
+    resetting to 0 every time the reader mounts."""
+    __tablename__ = "reading_progress"
+    __table_args__ = (
+        UniqueConstraint("user_id", "doc_id", name="uq_reading_progress_user_doc"),
+        {"extend_existing": True},
+    )
+
+    id                 = Column(Integer,      primary_key=True)
+    user_id            = Column(String(128),  index=True, nullable=False)
+    doc_id             = Column(String(36),   ForeignKey("documents.doc_id", ondelete="CASCADE"),
+                                index=True, nullable=False)
+    last_section_index = Column(Integer,      default=0,   nullable=False)
+    progress_percent   = Column(Integer,      default=0,   nullable=False)
+    last_viewed_at     = Column(DateTime,     default=datetime.utcnow,
+                                onupdate=datetime.utcnow, nullable=False, index=True)
+
+
+class ReadingActivityDay(Base):
+    """One row per (user, calendar day) - upserted whenever reading
+    progress is saved, incrementing seconds_read. Separate from
+    ReadingProgress (which only keeps the LATEST state per document, so it
+    can't answer "was this user active on Tuesday") - this is what the
+    streak and total-time-read numbers on the library analytics dashboard
+    are actually computed from."""
+    __tablename__ = "reading_activity_days"
+    __table_args__ = (
+        UniqueConstraint("user_id", "activity_date", name="uq_reading_activity_user_date"),
+        {"extend_existing": True},
+    )
+
+    id            = Column(Integer,     primary_key=True)
+    user_id       = Column(String(128), index=True, nullable=False)
+    activity_date = Column(Date,        nullable=False, index=True)
+    seconds_read  = Column(Integer,     default=0, nullable=False)
