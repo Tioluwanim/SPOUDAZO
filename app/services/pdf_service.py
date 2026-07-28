@@ -11,6 +11,7 @@ from datetime import datetime
 from app.config import (
     UPLOAD_DIR,
     PROCESSED_DIR,
+    THUMBNAIL_DIR,
     MAX_FILE_SIZE_BYTES,
     MAX_FILE_SIZE_MB,
     ALLOWED_EXTENSIONS,
@@ -371,6 +372,48 @@ class PDFService:
         """Returns True if document is fully processed and ready for chat."""
         doc = self.load_document(doc_id)
         return doc is not None and doc.status == DocumentStatus.READY
+
+    def get_page_thumbnail(self, doc_id: str, page_number: int, target_width: int = 320) -> Path | None:
+        """
+        Renders (and caches to disk) a low-res PNG of one page, for the
+        reader's page-thumbnail strip. Generated on first request, not
+        during upload processing - upload should stay fast, and most
+        pages of most documents are never actually opened via the
+        thumbnail strip, so rendering all of them upfront would mostly
+        be wasted work.
+
+        Returns None if the document/page doesn't exist or rendering
+        fails (e.g. a non-PDF-derived document with no real pages) -
+        callers treat that as "no thumbnail available", not an error.
+        """
+        cache_path = THUMBNAIL_DIR / doc_id / f"{page_number}.png"
+        if cache_path.exists():
+            return cache_path
+
+        doc = self.load_document(doc_id)
+        if doc is None or not Path(doc.file_path).exists():
+            return None
+
+        try:
+            from app.services.extraction_service import _get_fitz_module
+            fitz = _get_fitz_module()
+        except ImportError:
+            logger.warning(f"[{doc_id}] PyMuPDF unavailable — cannot render thumbnails")
+            return None
+
+        try:
+            with fitz.open(doc.file_path) as pdf:
+                if not (1 <= page_number <= pdf.page_count):
+                    return None
+                page = pdf[page_number - 1]  # fitz pages are 0-indexed
+                zoom = target_width / page.rect.width if page.rect.width else 1.0
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                pixmap.save(str(cache_path))
+                return cache_path
+        except Exception as e:
+            logger.warning(f"[{doc_id}] Thumbnail render failed for page {page_number}: {e}")
+            return None
 
     # ── Private ───────────────────────────────────────────────────────────────
 
