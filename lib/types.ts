@@ -15,6 +15,123 @@ export interface Material {
   week_number: number | null;
 }
 
+export interface DocumentSection {
+  title: string;
+  content: string;
+  section_type: string;
+  page_start: number;
+  page_end: number;
+}
+
+export interface MaterialDetail {
+  doc_id: string;
+  filename: string;
+  status: string;
+  week_number: number | null;
+  course_id: number;
+  page_count: number;
+  word_count: number;
+  sections: DocumentSection[];
+}
+
+export type AnnotationKind = "highlight" | "bookmark";
+
+export interface Annotation {
+  id: number;
+  doc_id: string;
+  kind: AnnotationKind;
+  section_index: number;
+  quote: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface Bookmark {
+  id: number;
+  doc_id: string;
+  filename: string;
+  course_id: number;
+  section_index: number;
+  quote: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface RecentDocument {
+  doc_id: string;
+  filename: string;
+  course_id: number;
+  progress_percent: number;
+  last_viewed_at: string;
+}
+
+export type TextAction =
+  | "explain"
+  | "explain_simply"
+  | "example"
+  | "analogy"
+  | "summarize"
+  | "mnemonic"
+  | "flashcards"
+  | "key_points"
+  | "theory_question"
+  | "cbt"
+  | "visualize"
+  | "translate"
+  | "define";
+
+export interface TextActionResult {
+  action: TextAction;
+  kind: "prose" | "list" | "object";
+  result: string | Flashcard[] | string[] | TheoryQuestionResult | CBTResult | VisualizeResult | DefineResult;
+}
+
+export interface Flashcard {
+  front: string;
+  back: string;
+}
+
+export interface TheoryQuestionResult {
+  question: string;
+  rubric_points: string[];
+}
+
+export interface CBTResult {
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
+}
+
+export interface VisualizeResult {
+  applicable: boolean;
+  diagram_type?: string;
+  mermaid?: string;
+  reason?: string;
+}
+
+export interface DefineResult {
+  term: string;
+  definition: string;
+  pronunciation: string | null;
+  simple_explanation: string;
+  related_concepts: string[];
+  example: string;
+  difficulty_level: "easy" | "medium" | "hard";
+  estimated_learning_time_minutes: number;
+}
+
+export interface ReadingStats {
+  total_seconds_read: number;
+  active_days: number;
+  current_streak_days: number;
+  documents_started: number;
+  documents_completed: number;
+  highlight_count: number;
+  bookmark_count: number;
+  favorite_count: number;
+}
+
 export interface Topic {
   id: number;
   name: string;
