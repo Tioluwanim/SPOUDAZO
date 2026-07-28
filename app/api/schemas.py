@@ -38,6 +38,32 @@ class MaterialOut(BaseModel):
     week_number: int | None = None
 
 
+class DocumentSectionOut(BaseModel):
+    """One reading-pane unit. Sections (not raw pages) are the natural unit
+    for the reader - they already carry a title and a page range from
+    extraction, so the frontend doesn't need to reinvent chaptering."""
+    title: str
+    content: str
+    section_type: str
+    page_start: int
+    page_end: int
+
+
+class MaterialDetailOut(BaseModel):
+    """Everything the reading pane needs for one document. Deliberately
+    omits raw chunks (RAG's unit, not the reader's) and full_text (sections
+    already cover the same content, structured) - sending both would double
+    the payload for no benefit to the reading experience."""
+    doc_id: str
+    filename: str
+    status: str
+    week_number: int | None = None
+    course_id: int
+    page_count: int
+    word_count: int
+    sections: list[DocumentSectionOut]
+
+
 # ── Topics ───────────────────────────────────────────────────────────────────
 
 class TopicOut(BaseModel):
@@ -188,3 +214,85 @@ class FeedbackOut(BaseModel):
     metadata: dict
     created_at: datetime
     updated_at: datetime
+
+
+# ── Smart Library reader ────────────────────────────────────────────────────
+
+class AnnotationCreate(BaseModel):
+    kind: str  # highlight | bookmark
+    section_index: int
+    quote: str
+    note: str | None = None
+
+
+class AnnotationOut(BaseModel):
+    id: int
+    doc_id: str
+    kind: str
+    section_index: int
+    quote: str
+    note: str | None
+    created_at: datetime
+
+
+class BookmarkOut(BaseModel):
+    """Annotation plus enough document context to render in the
+    cross-course sidebar without a second lookup per bookmark."""
+    id: int
+    doc_id: str
+    filename: str
+    course_id: int
+    section_index: int
+    quote: str
+    note: str | None
+    created_at: datetime
+
+
+class RecentDocumentOut(BaseModel):
+    doc_id: str
+    filename: str
+    course_id: int
+    progress_percent: int
+    last_viewed_at: datetime
+
+
+class FavoriteToggleOut(BaseModel):
+    doc_id: str
+    favorited: bool
+
+
+class ReadingProgressIn(BaseModel):
+    last_section_index: int
+    progress_percent: int
+    seconds_delta: int = 0  # seconds spent reading since the last save - feeds streak/time-read analytics
+
+
+class ReadingProgressOut(BaseModel):
+    doc_id: str
+    last_section_index: int
+    progress_percent: int
+    last_viewed_at: datetime
+
+
+class ReadingStatsOut(BaseModel):
+    total_seconds_read: int
+    active_days: int
+    current_streak_days: int
+    documents_started: int
+    documents_completed: int
+    highlight_count: int
+    bookmark_count: int
+    favorite_count: int
+
+
+class TextActionRequest(BaseModel):
+    action: str
+    selected_text: str
+    section_title: str = ""
+    target_language: str = ""  # only used by the "translate" action
+
+
+class TextActionResponse(BaseModel):
+    action: str
+    kind: str          # "prose" | "list" | "object"
+    result: str | list | dict
