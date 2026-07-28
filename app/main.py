@@ -74,6 +74,7 @@ from app.api import (
     chat,
     courses,
     feedback,
+    library,
     materials,
     questions,
     resources,
@@ -91,3 +92,4 @@ app.include_router(study_plan.router)
 app.include_router(study_plan.item_router)
 app.include_router(resources.router)
 app.include_router(feedback.router)
+app.include_router(library.router)
