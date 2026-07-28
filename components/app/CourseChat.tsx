@@ -2,83 +2,29 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MessageCircle, Send, X, BookOpen, Globe2, Sparkles } from "lucide-react";
-import { sendCourseChat } from "@/lib/api";
-import { useToast } from "@/components/ui/Toast";
-import type { ChatTurn } from "@/lib/types";
-
-interface DisplayMessage extends ChatTurn {
-  grounding?: "notes" | "notes+web" | "web" | "general";
-  sources?: string[];
-}
-
-const GROUNDING_BADGE: Record<
-  NonNullable<DisplayMessage["grounding"]>,
-  { label: string; icon: typeof BookOpen }
-> = {
-  notes: { label: "From your notes", icon: BookOpen },
-  "notes+web": { label: "Your notes + web", icon: Globe2 },
-  web: { label: "Web resources — not in your notes", icon: Globe2 },
-  general: { label: "General knowledge — not in your notes", icon: Sparkles },
-};
+import { MessageCircle, Send, X, BookOpen } from "lucide-react";
+import { ChatMessageList } from "@/components/app/ChatMessages";
+import { useCourseChat } from "@/lib/useCourseChat";
 
 /**
  * CourseChat - floating "ask about your notes" widget, scoped to one
- * course. Chat history lives only in this component's state - it does
- * not persist server-side (see app/agents/notes_chat.py), so it resets
- * on refresh. Good enough for "ask a question while studying"; revisit
- * if students want their chat history to survive a reload.
- *
- * Every assistant message carries a grounding badge - see
- * app/agents/notes_chat.py for why this matters: the chatbot can now
- * answer from cached web resources or general knowledge when the
- * student's own notes don't cover something, and the badge is what
- * keeps that transparent instead of blurring "from your material" with
- * "the model is guessing."
+ * course. State/send logic lives in useCourseChat (also used by the Smart
+ * Library reader's docked AI panel) so both surfaces share one
+ * implementation instead of drifting apart.
  */
 export function CourseChat({ courseId }: { courseId: number }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const { push } = useToast();
+  const { messages, input, setInput, sending, send } = useCourseChat(courseId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
 
-  async function handleSend() {
-    const message = input.trim();
-    if (!message || sending) return;
-
-    const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: message }];
-    setMessages(nextMessages);
-    setInput("");
-    setSending(true);
-
-    try {
-      // Only role+content go to the backend as history - grounding/sources
-      // are display-only annotations added after each response.
-      const history: ChatTurn[] = messages.map(({ role, content }) => ({ role, content }));
-      const result = await sendCourseChat(courseId, message, history);
-      setMessages([
-        ...nextMessages,
-        { role: "assistant", content: result.answer, grounding: result.grounding, sources: result.sources },
-      ]);
-    } catch (err) {
-      push(err instanceof Error ? err.message : "Couldn't reach the study assistant", "error");
-      setMessages(messages); // roll back the optimistic user message on failure
-      setInput(message);
-    } finally {
-      setSending(false);
-    }
-  }
-
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      send();
     }
   }
 
@@ -122,58 +68,19 @@ export function CourseChat({ courseId }: { courseId: number }) {
             </div>
 
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-              {messages.length === 0 && (
-                <div className="flex h-full flex-col items-center justify-center text-center text-paper-faint">
-                  <BookOpen size={28} className="mb-2 text-ai-accent/60" />
-                  <p className="text-sm">
-                    Hey! Ask me anything about the material you&apos;ve uploaded — I&apos;m
-                    happy to walk through it with you.
-                  </p>
-                </div>
-              )}
-              {messages.map((m, i) => {
-                const badge = m.grounding ? GROUNDING_BADGE[m.grounding] : null;
-                const BadgeIcon = badge?.icon;
-                return (
-                  <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className="max-w-[85%]">
-                      <div
-                        className={`rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                          m.role === "user"
-                            ? "bg-ai-accent text-white"
-                            : "border border-ink-border bg-ink text-paper"
-                        }`}
-                      >
-                        {m.content}
-                      </div>
-                      {badge && BadgeIcon && (
-                        <div
-                          className={`mt-1.5 flex items-center gap-1 text-[11px] ${
-                            m.grounding === "notes" ? "text-success" : "text-achievement"
-                          }`}
-                        >
-                          <BadgeIcon size={11} />
-                          {badge.label}
-                        </div>
-                      )}
-                      {m.sources && m.sources.length > 0 && (
-                        <p className="mt-1 text-[11px] text-paper-faint">
-                          Sources: {m.sources.join(", ")}
-                        </p>
-                      )}
-                    </div>
+              <ChatMessageList
+                messages={messages}
+                sending={sending}
+                emptyState={
+                  <div className="flex h-full flex-col items-center justify-center text-center text-paper-faint">
+                    <BookOpen size={28} className="mb-2 text-ai-accent/60" />
+                    <p className="text-sm">
+                      Hey! Ask me anything about the material you&apos;ve uploaded — I&apos;m
+                      happy to walk through it with you.
+                    </p>
                   </div>
-                );
-              })}
-              {sending && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-1.5 rounded-xl border border-ink-border bg-ink px-3.5 py-2.5">
-                    <Dot />
-                    <Dot delay={0.15} />
-                    <Dot delay={0.3} />
-                  </div>
-                </div>
-              )}
+                }
+              />
             </div>
 
             <div className="border-t border-ink-border p-3">
@@ -187,7 +94,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
                   className="flex-1 resize-none rounded-xl border border-ink-border bg-ink px-3 py-2.5 text-sm text-paper placeholder:text-paper-faint focus-ring"
                 />
                 <button
-                  onClick={handleSend}
+                  onClick={send}
                   disabled={sending || !input.trim()}
                   aria-label="Send"
                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ai-accent text-white transition-opacity hover:bg-ai-accent-deep disabled:opacity-40 focus-ring"
@@ -200,15 +107,5 @@ export function CourseChat({ courseId }: { courseId: number }) {
         )}
       </AnimatePresence>
     </>
-  );
-}
-
-function Dot({ delay = 0 }: { delay?: number }) {
-  return (
-    <motion.span
-      className="h-1.5 w-1.5 rounded-full bg-paper-faint"
-      animate={{ opacity: [0.3, 1, 0.3] }}
-      transition={{ duration: 1, repeat: Infinity, delay }}
-    />
   );
 }
