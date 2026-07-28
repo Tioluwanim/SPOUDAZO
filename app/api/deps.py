@@ -20,7 +20,7 @@ from fastapi import Depends, HTTPException
 
 from app.auth import get_current_user_id
 from app.config import ADMIN_USER_IDS
-from app.db.models import Course, Question, Topic
+from app.db.models import Course, Document, Question, Topic
 from app.db.repository import repository
 
 
@@ -29,6 +29,14 @@ def require_course_owner(course_id: int, user_id: str) -> Course:
     if course is None or course.user_id != user_id:
         raise HTTPException(404, "Course not found")
     return course
+
+
+def require_document_owner(doc_id: str, user_id: str) -> Document:
+    document = repository.get_document_by_doc_id(doc_id)
+    if document is None or document.course_id is None:
+        raise HTTPException(404, "Document not found")
+    require_course_owner(document.course_id, user_id)
+    return document
 
 
 def require_topic_owner(topic_id: int, user_id: str) -> Topic:
