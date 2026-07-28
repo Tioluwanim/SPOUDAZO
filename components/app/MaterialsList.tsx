@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -30,7 +31,7 @@ function groupByWeek(materials: Material[]): [string, Material[]][] {
   });
 }
 
-export function MaterialsList({ materials }: { materials: Material[] }) {
+export function MaterialsList({ materials, courseId }: { materials: Material[]; courseId: number }) {
   if (materials.length === 0) return null;
   const groups = groupByWeek(materials);
 
@@ -44,11 +45,10 @@ export function MaterialsList({ materials }: { materials: Material[] }) {
           <ul className="space-y-2">
             {items.map((m) => {
               const phase = PHASE[m.status];
-              return (
-                <li
-                  key={m.doc_id}
-                  className="rounded-xl border border-ink-border bg-ink-surface/40 px-4 py-3 text-sm"
-                >
+              const rowClass =
+                "rounded-xl border border-ink-border bg-ink-surface/40 px-4 py-3 text-sm";
+              const row = (
+                <>
                   <div className="flex items-center gap-3">
                     <FileText size={15} className="shrink-0 text-paper-faint" />
                     <span className="flex-1 truncate text-paper-dim">{m.filename}</span>
@@ -74,6 +74,21 @@ export function MaterialsList({ materials }: { materials: Material[] }) {
                     <p className="mt-2 pl-[27px] text-xs text-danger">
                       Processing failed — try removing and re-uploading this file.
                     </p>
+                  )}
+                </>
+              );
+
+              return (
+                <li key={m.doc_id}>
+                  {m.status === "ready" ? (
+                    <Link
+                      href={`/courses/${courseId}/materials/${m.doc_id}`}
+                      className={`block transition-colors hover:border-ai-accent/40 ${rowClass}`}
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    <div className={rowClass}>{row}</div>
                   )}
                 </li>
               );
