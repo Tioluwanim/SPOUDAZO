@@ -107,7 +107,7 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
             }
           />
           <div className="mt-4">
-            <MaterialsList materials={materials} />
+            <MaterialsList materials={materials} courseId={courseId} />
           </div>
         </section>
 
