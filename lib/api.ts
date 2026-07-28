@@ -1,4 +1,7 @@
 import type {
+  Annotation,
+  AnnotationKind,
+  Bookmark,
   CBTAttemptResult,
   CBTQuestion,
   ChatTurn,
@@ -8,7 +11,12 @@ import type {
   FeedbackCategory,
   FeedbackSeverity,
   Material,
+  MaterialDetail,
+  RecentDocument,
+  ReadingStats,
   StudyPlan,
+  TextAction,
+  TextActionResult,
   TheoryAttemptResult,
   TheoryQuestion,
   Topic,
@@ -102,6 +110,112 @@ export function uploadMaterial(courseId: number, file: File, weekNumber?: number
 
 export function listMaterials(courseId: number) {
   return request<Material[]>(`/courses/${courseId}/materials`);
+}
+
+export function getMaterialDetail(courseId: number, docId: string) {
+  return request<MaterialDetail>(`/courses/${courseId}/materials/${docId}`);
+}
+
+// ── Reader: annotations, favorites, progress, AI actions ───────────────────
+
+export function createAnnotation(
+  courseId: number,
+  docId: string,
+  kind: AnnotationKind,
+  sectionIndex: number,
+  quote: string,
+  note?: string
+) {
+  return request<Annotation>(`/courses/${courseId}/materials/${docId}/annotations`, {
+    method: "POST",
+    body: JSON.stringify({ kind, section_index: sectionIndex, quote, note }),
+  });
+}
+
+export function listAnnotations(courseId: number, docId: string, kind?: AnnotationKind) {
+  const qs = kind ? `?kind=${kind}` : "";
+  return request<Annotation[]>(`/courses/${courseId}/materials/${docId}/annotations${qs}`);
+}
+
+export function deleteAnnotation(courseId: number, docId: string, annotationId: number) {
+  return request<void>(`/courses/${courseId}/materials/${docId}/annotations/${annotationId}`, {
+    method: "DELETE",
+  });
+}
+
+export function toggleFavorite(courseId: number, docId: string) {
+  return request<{ doc_id: string; favorited: boolean }>(
+    `/courses/${courseId}/materials/${docId}/favorite`,
+    { method: "POST" }
+  );
+}
+
+export function getReadingProgress(courseId: number, docId: string) {
+  return request<{ doc_id: string; last_section_index: number; progress_percent: number; last_viewed_at: string } | null>(
+    `/courses/${courseId}/materials/${docId}/progress`
+  );
+}
+
+export function updateReadingProgress(
+  courseId: number,
+  docId: string,
+  lastSectionIndex: number,
+  progressPercent: number,
+  secondsDelta = 0
+) {
+  return request<{ doc_id: string; last_section_index: number; progress_percent: number; last_viewed_at: string }>(
+    `/courses/${courseId}/materials/${docId}/progress`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        last_section_index: lastSectionIndex,
+        progress_percent: progressPercent,
+        seconds_delta: secondsDelta,
+      }),
+    }
+  );
+}
+
+export function runTextAction(
+  courseId: number,
+  docId: string,
+  action: TextAction,
+  selectedText: string,
+  sectionTitle?: string,
+  targetLanguage?: string
+) {
+  return request<TextActionResult>(`/courses/${courseId}/materials/${docId}/text-action`, {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      selected_text: selectedText,
+      section_title: sectionTitle || "",
+      target_language: targetLanguage || "",
+    }),
+  });
+}
+
+// Thumbnails are served from an auth-protected endpoint - see
+// components/app/AuthedThumbnail.tsx, which fetches with the Bearer token
+// and hands back an object URL, rather than a plain URL string here that
+// a raw <img src> couldn't actually load.
+
+// ── Smart Library (cross-course) ────────────────────────────────────────────
+
+export function listRecentDocuments(limit = 10) {
+  return request<RecentDocument[]>(`/library/recent?limit=${limit}`);
+}
+
+export function listAllBookmarks(limit = 50) {
+  return request<Bookmark[]>(`/library/bookmarks?limit=${limit}`);
+}
+
+export function listFavoriteDocuments() {
+  return request<RecentDocument[]>(`/library/favorites`);
+}
+
+export function getReadingAnalytics() {
+  return request<ReadingStats>(`/library/analytics`);
 }
 
 // ── Topics ───────────────────────────────────────────────────────────────
