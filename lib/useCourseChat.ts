@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { sendCourseChat } from "@/lib/api";
+import { streamCourseChat } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import type { ChatTurn } from "@/lib/types";
 
@@ -21,8 +21,19 @@ export interface DisplayMessage extends ChatTurn {
  * History lives only in component state (not persisted server-side, per
  * app/agents/notes_chat.py) - resets on refresh, same limitation in both
  * call sites.
+ *
+ * `currentDocId`/`currentSectionIndex` are the reader's "what's on screen
+ * right now" - passed through to the backend's AI Context Service (see
+ * app/services/ai_context_service.py) so the assistant already knows
+ * without the student stating it. The floating widget (outside the
+ * reader) simply doesn't pass these; the backend then falls back to the
+ * user's most recently read document in this course automatically.
  */
-export function useCourseChat(courseId: number) {
+export function useCourseChat(
+  courseId: number,
+  currentDocId?: string,
+  currentSectionIndex?: number
+) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -37,16 +48,45 @@ export function useCourseChat(courseId: number) {
     setInput("");
     setSending(true);
 
+    // Placeholder assistant message that fills in as tokens arrive -
+    // this is what makes streaming visible instead of just an
+    // implementation detail with the same perceived wait as before.
+    let streamedIndex = -1;
+    setMessages((prev) => {
+      streamedIndex = prev.length;
+      return [...prev, { role: "assistant", content: "" }];
+    });
+
     try {
       const history: ChatTurn[] = messages.map(({ role, content }) => ({ role, content }));
-      const result = await sendCourseChat(courseId, message, history);
-      setMessages([
-        ...nextMessages,
-        { role: "assistant", content: result.answer, grounding: result.grounding, sources: result.sources },
-      ]);
+      let accumulated = "";
+
+      await streamCourseChat(
+        courseId,
+        message,
+        history,
+        {
+          onMeta: (meta) => {
+            setMessages((prev) =>
+              prev.map((m, i) => (i === streamedIndex ? { ...m, grounding: meta.grounding, sources: meta.sources } : m))
+            );
+          },
+          onToken: (text) => {
+            accumulated += text;
+            setMessages((prev) =>
+              prev.map((m, i) => (i === streamedIndex ? { ...m, content: accumulated } : m))
+            );
+          },
+          onError: (errMessage) => {
+            throw new Error(errMessage);
+          },
+        },
+        currentDocId,
+        currentSectionIndex
+      );
     } catch (err) {
       push(err instanceof Error ? err.message : "Couldn't reach the study assistant", "error");
-      setMessages(messages); // roll back the optimistic user message on failure
+      setMessages(messages); // roll back both the optimistic user message and the streaming placeholder
       setInput(message);
     } finally {
       setSending(false);
