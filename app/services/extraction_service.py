@@ -65,7 +65,7 @@ from collections import Counter
 from html import unescape
 from pathlib import Path
 from typing import Optional
-
+from app.services.pdf_service import pdf_service
 from app.config import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
@@ -228,7 +228,17 @@ class ExtractionService:
         try:
             doc.status = DocumentStatus.EXTRACTING
 
-            pages_text, metadata, repeated_lines = self._extract_from_pdf(doc.file_path, slog)
+            local_pdf = pdf_service.get_local_file_path(doc.doc_id)
+
+            if local_pdf is None:
+              raise FileNotFoundError(
+                f"Unable to obtain local copy of '{doc.filename}'"
+              )
+
+            pages_text, metadata, repeated_lines = self._extract_from_pdf(
+              str(local_pdf),
+              slog,
+            )
 
             # Strip running headers/footers from every page
             clean_pages = [_remove_repeated_lines(p, repeated_lines) for p in pages_text]
