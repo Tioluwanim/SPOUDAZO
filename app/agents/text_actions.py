@@ -161,6 +161,18 @@ _STRUCTURED_PROMPTS: dict[str, str] = {
     "define": _DEFINE_SYSTEM_PROMPT,
 }
 
+# Which model-routing task type (see app.services.task_classifier) each
+# action should hint at - most actions don't need a hint (None = default
+# model), but exam-style question generation genuinely benefits from a
+# stronger reasoning model, and diagram generation from whichever model is
+# configured as best at producing valid Mermaid syntax.
+_ACTION_TASK_TYPE: dict[str, str] = {
+    "theory_question": "reasoning",
+    "cbt": "reasoning",
+    "visualize": "creative",
+    "define": "simple",
+}
+
 
 def _build_user_prompt(selected_text: str, section_title: str, course_context: str) -> str:
     parts = []
@@ -197,6 +209,7 @@ def run_text_action(
             system_prompt=_PROSE_SYSTEM_PROMPTS[action],
             user_prompt=user_prompt,
             doc_id=doc_id,
+            task_type=_ACTION_TASK_TYPE.get(action),
         )
         return {"kind": "prose", "result": result.strip()}
 
@@ -211,7 +224,9 @@ def run_text_action(
         return {"kind": "prose", "result": result.strip()}
 
     system_prompt = _STRUCTURED_PROMPTS[action]
-    parsed = call_llm_json_with_retry(system_prompt, user_prompt, doc_id=doc_id)
+    parsed = call_llm_json_with_retry(
+        system_prompt, user_prompt, doc_id=doc_id, task_type=_ACTION_TASK_TYPE.get(action),
+    )
 
     if action in ("flashcards", "key_points"):
         if not isinstance(parsed, list):
