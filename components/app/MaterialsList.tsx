@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
+import { prefetchMaterialDetail } from "@/lib/documentCache";
 import type { Material } from "@/lib/types";
 
 // Coarse phase → (label, progress%) - matches the real pipeline in
@@ -83,6 +84,7 @@ export function MaterialsList({ materials, courseId }: { materials: Material[]; 
                   {m.status === "ready" ? (
                     <Link
                       href={`/courses/${courseId}/materials/${m.doc_id}`}
+                      onMouseEnter={() => prefetchMaterialDetail(courseId, m.doc_id)}
                       className={`block transition-colors hover:border-ai-accent/40 ${rowClass}`}
                     >
                       {row}
