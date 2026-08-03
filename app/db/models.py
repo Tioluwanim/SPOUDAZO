@@ -39,6 +39,17 @@ class Document(Base):
     checksum          = Column(String(64),   default="",  nullable=True)
     modified_time     = Column(DateTime,     nullable=True)
     local_path        = Column(String(1024), nullable=False)
+    # Where the ORIGINAL file actually lives. Every document created before
+    # this feature existed has storage_provider=NULL, which the app treats
+    # identically to "local" (see pdf_service) - local_path keeps meaning
+    # exactly what it always meant for those rows. New uploads set this
+    # explicitly. storage_key is the object key for a lookup through
+    # StorageService (== local_path's filename for local, an R2 object key
+    # for r2); storage_url is a best-effort direct URL, empty when none is
+    # safe to expose (see StorageService.get_url).
+    storage_provider  = Column(String(16),   nullable=True)  # NULL/"local" | "r2"
+    storage_key       = Column(String(1024), nullable=True)
+    storage_url       = Column(String(2048), nullable=True)
     status            = Column(String(32),   default=DocumentStatus.UPLOADED.value, nullable=False)
     page_count        = Column(Integer,      default=0,   nullable=False)
     chunk_count       = Column(Integer,      default=0,   nullable=False)
@@ -429,10 +440,14 @@ class Feedback(Base):
 
 
 class Annotation(Base):
-    """A highlight or a bookmark, anchored to one section of one document.
-    Both share the same shape (a quoted span of text, optionally with a
-    note) - splitting them into two tables would just mean duplicating
-    every query. `kind` is the only thing that distinguishes them."""
+    """A highlight, bookmark, or sticky note, anchored to one section of
+    one document. All three share the same shape (a quoted span of text,
+    optionally with a note) - splitting them into separate tables would
+    just mean duplicating every query. `kind` is what distinguishes them;
+    for a sticky note (not tied to a specific highlighted phrase the way
+    a highlight/bookmark is), `quote` holds the section title as its
+    anchor and the actual note content lives in `note`.
+    """
     __tablename__ = "annotations"
     __table_args__ = {"extend_existing": True}
 
@@ -440,7 +455,7 @@ class Annotation(Base):
     user_id        = Column(String(128),  index=True, nullable=False)
     doc_id         = Column(String(36),   ForeignKey("documents.doc_id", ondelete="CASCADE"),
                             index=True, nullable=False)
-    kind           = Column(String(16),   nullable=False, index=True)  # highlight | bookmark
+    kind           = Column(String(16),   nullable=False, index=True)  # highlight | bookmark | sticky_note
     section_index  = Column(Integer,      nullable=False)   # index into ProcessedDocument.sections
     quote          = Column(Text,         nullable=False)   # the selected text itself
     note           = Column(Text,         nullable=True)     # optional student note (bookmarks mainly)
