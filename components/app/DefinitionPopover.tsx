@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, X as XIcon } from "lucide-react";
 import { runTextAction } from "@/lib/api";
+import { getContainerSelection, isSingleWordSelection } from "@/lib/selectionService";
 import type { DefineResult } from "@/lib/types";
 
 const DIFFICULTY_COLOR: Record<DefineResult["difficulty_level"], string> = {
@@ -40,16 +41,12 @@ export function DefinitionPopover({
 
   useEffect(() => {
     async function onDblClick(e: MouseEvent) {
-      const container = containerRef.current;
-      if (!container || !container.contains(e.target as Node)) return;
-
-      const sel = window.getSelection();
-      const word = sel?.toString().trim();
-      if (!word || word.length < 2 || /\s/.test(word)) return; // double-click-select gives one word; ignore odd cases
+      const found = getContainerSelection(containerRef.current);
+      if (!found || !isSingleWordSelection(found.text) || found.text.length < 2) return;
 
       setState({ status: "loading", x: e.clientX, y: e.clientY });
       try {
-        const res = await runTextAction(courseId, docId, "define", word);
+        const res = await runTextAction(courseId, docId, "define", found.text);
         setState({ status: "loaded", x: e.clientX, y: e.clientY, data: res.result as DefineResult });
       } catch {
         setState({ status: "error", x: e.clientX, y: e.clientY });
