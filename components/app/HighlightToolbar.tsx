@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { createAnnotation, runTextAction } from "@/lib/api";
+import { getContainerSelection, isSingleWordSelection, clearSelection } from "@/lib/selectionService";
 import type { CourseChatState } from "@/lib/useCourseChat";
 import type { CBTResult, Flashcard, TextAction, TextActionResult, TheoryQuestionResult, VisualizeResult } from "@/lib/types";
 
@@ -110,31 +111,19 @@ export function HighlightToolbar({
 
   useEffect(() => {
     function onSelectionChange() {
-      const sel = window.getSelection();
-      const container = containerRef.current;
-      if (!sel || sel.isCollapsed || !container) {
-        return;
-      }
-      const text = sel.toString().trim();
-      if (!text) return;
-      // A single word with no whitespace is what a double-click produces -
-      // that's DefinitionPopover's territory (see that component), not
-      // this toolbar's. Showing both for the same selection would stack
-      // two floating panels on top of each other.
-      if (!/\s/.test(text)) return;
+      const found = getContainerSelection(containerRef.current);
+      if (!found) return;
+      // A single-word selection is what a double-click produces - that's
+      // DefinitionPopover's territory, not this toolbar's (see
+      // lib/selectionService.ts).
+      if (isSingleWordSelection(found.text)) return;
 
-      const anchorNode = sel.anchorNode;
-      if (!anchorNode || !container.contains(anchorNode)) return;
-
-      const sectionEl = (anchorNode instanceof Element ? anchorNode : anchorNode.parentElement)?.closest<HTMLElement>(
-        "[data-section-index]"
-      );
-      if (!sectionEl) return;
-      const sectionIndex = Number(sectionEl.dataset.sectionIndex);
-
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setSelection({ text, sectionIndex, x: rect.left + rect.width / 2, y: rect.top });
+      setSelection({
+        text: found.text,
+        sectionIndex: found.sectionIndex,
+        x: found.rect.left + found.rect.width / 2,
+        y: found.rect.top,
+      });
       setMode("actions");
       setNote("");
     }
@@ -170,7 +159,7 @@ export function HighlightToolbar({
         text,
         mermaid
       );
-      window.getSelection()?.removeAllRanges();
+      clearSelection();
       setSelection(null);
     } catch (err) {
       push(err instanceof Error ? err.message : "That didn't work — try again", "error");
@@ -188,7 +177,7 @@ export function HighlightToolbar({
         `Translate to ${language}: "${selection.text.slice(0, 80)}${selection.text.length > 80 ? "…" : ""}"`,
         res.result as string
       );
-      window.getSelection()?.removeAllRanges();
+      clearSelection();
       setSelection(null);
     } catch (err) {
       push(err instanceof Error ? err.message : "Couldn't translate that — try again", "error");
@@ -201,7 +190,7 @@ export function HighlightToolbar({
     if (!selection) return;
     await navigator.clipboard.writeText(selection.text);
     push("Copied");
-    window.getSelection()?.removeAllRanges();
+    clearSelection();
     setSelection(null);
   }
 
@@ -214,7 +203,7 @@ export function HighlightToolbar({
     } catch (err) {
       push(err instanceof Error ? err.message : "Couldn't save the highlight", "error");
     }
-    window.getSelection()?.removeAllRanges();
+    clearSelection();
     setSelection(null);
   }
 
@@ -226,7 +215,7 @@ export function HighlightToolbar({
     } catch (err) {
       push(err instanceof Error ? err.message : "Couldn't save the bookmark", "error");
     }
-    window.getSelection()?.removeAllRanges();
+    clearSelection();
     setSelection(null);
   }
 
