@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { BookOpen, Globe2, Sparkles } from "lucide-react";
 import { MermaidDiagram } from "@/components/app/MermaidDiagram";
+import { MarkdownMessage } from "@/components/app/MarkdownMessage";
 import type { DisplayMessage } from "@/lib/useCourseChat";
 
 const GROUNDING_BADGE: Record<
@@ -35,13 +36,13 @@ export function ChatMessageList({
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
             <div className="max-w-[85%]">
               <div
-                className={`rounded-xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                className={`rounded-xl px-3.5 py-2.5 ${
                   m.role === "user"
-                    ? "bg-ai-accent text-white"
-                    : "border border-ink-border bg-ink text-paper"
+                    ? "bg-ai-accent text-sm leading-relaxed text-white"
+                    : "border border-ink-border bg-ink"
                 }`}
               >
-                {m.content}
+                {m.role === "user" ? m.content : <MarkdownMessage content={m.content} />}
               </div>
               {m.mermaid && (
                 <div className="mt-2">
