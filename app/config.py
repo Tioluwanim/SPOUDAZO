@@ -24,6 +24,12 @@ PROCESSED_DIR = DATA_DIR / "processed"
 VECTORSTORE_DIR = DATA_DIR / "vectorstore"
 FEEDBACK_UPLOAD_DIR = DATA_DIR / "feedback"
 THUMBNAIL_DIR = DATA_DIR / "thumbnails"
+# Ephemeral scratch space only, for r2-provider documents: R2 is the
+# durable source of truth, this is just a local working copy so the
+# existing file-path-based extraction/thumbnail code doesn't need to be
+# rewritten to stream everything - safe to lose, regenerated on demand
+# from get_local_file_path() in pdf_service.
+R2_CACHE_DIR = DATA_DIR / "r2_cache"
 
 LOGS_DIR = BASE_DIR / "logs"
 
@@ -321,6 +327,7 @@ for directory in (
     VECTORSTORE_DIR,
     FEEDBACK_UPLOAD_DIR,
     THUMBNAIL_DIR,
+    R2_CACHE_DIR,
     LOGS_DIR,
 ):
     directory.mkdir(parents=True, exist_ok=True)
@@ -559,6 +566,20 @@ OPENROUTER_MODEL = _env_str("OPENROUTER_MODEL", "openrouter/free")
 OPENROUTER_TIMEOUT = _env_int("OPENROUTER_TIMEOUT", 90)
 OPENROUTER_RATE_LIMIT_DELAY = _env_float("OPENROUTER_RATE_LIMIT_DELAY", 10.0)
 
+# Per-task model overrides - all default to "" (meaning "use OPENROUTER_MODEL,
+# same as everything always has"), so task-based routing is opt-in and the
+# app behaves identically to before if none of these are set. OpenRouter's
+# free-model catalog changes over time, so we deliberately don't hardcode
+# specific free model slugs here - whoever deploys this can point these at
+# whichever free models are currently strong for that task (e.g. a
+# reasoning-tuned free model for OPENROUTER_MODEL_REASONING) without a code
+# change, and the safe default (same model as everything else) always works.
+OPENROUTER_MODEL_REASONING = _env_str("OPENROUTER_MODEL_REASONING", "")
+OPENROUTER_MODEL_CODING = _env_str("OPENROUTER_MODEL_CODING", "")
+OPENROUTER_MODEL_CREATIVE = _env_str("OPENROUTER_MODEL_CREATIVE", "")
+OPENROUTER_MODEL_LONG_CONTEXT = _env_str("OPENROUTER_MODEL_LONG_CONTEXT", "")
+OPENROUTER_MODEL_SIMPLE = _env_str("OPENROUTER_MODEL_SIMPLE", "")
+
 # =============================================================================
 # HUGGINGFACE
 # =============================================================================
@@ -568,6 +589,24 @@ HUGGINGFACE_BASE_URL = _env_str("HUGGINGFACE_BASE_URL", "https://router.huggingf
 HUGGINGFACE_MODEL = _env_str("HUGGINGFACE_MODEL", "meta-llama/Llama-3.1-8B-Instruct:cerebras")
 HUGGINGFACE_TIMEOUT = _env_int("HUGGINGFACE_TIMEOUT", 90)
 HF_MODEL_REPO = _env_str("HF_MODEL_REPO", "") or _env_str("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+# =============================================================================
+# GROQ
+# =============================================================================
+# A genuinely separate free-tier provider (not an OpenRouter proxy) - Groq's
+# API is OpenAI-compatible, so it's called the same way OpenRouter/HF are.
+# Sits between OpenRouter and HuggingFace in the fallback chain (see
+# ai_router.py): if OpenRouter's free router is rate-limited or degraded,
+# this is a real independent second opinion, not another route to the same
+# aggregator. GROQ_MODEL defaults to a commonly-available free-tier Llama
+# model - verify against Groq's current free-tier model list before relying
+# on this in production, the same caveat as the R2 provider elsewhere in
+# this codebase.
+GROQ_API_KEY = _env_str("GROQ_API_KEY")
+GROQ_BASE_URL = _env_str("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_MODEL = _env_str("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_TIMEOUT = _env_int("GROQ_TIMEOUT", 60)
+
 # =============================================================================
 # EMBEDDINGS
 # =============================================================================
@@ -679,6 +718,28 @@ ALLOWED_EXTENSIONS = {
 }
 
 # =============================================================================
+# STORAGE SETTINGS
+# =============================================================================
+# storage_provider is a per-*document* value (see Document.storage_provider),
+# decided at upload time and stored with the row - existing rows created
+# before this feature keep working as "local" forever, regardless of what
+# STORAGE_PROVIDER is set to going forward. This var only controls what NEW
+# uploads use.
+
+STORAGE_PROVIDER = _env_str("STORAGE_PROVIDER", "local").lower()  # "local" | "r2"
+
+R2_ACCOUNT_ID = _env_str("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = _env_str("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = _env_str("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = _env_str("R2_BUCKET_NAME", "")
+# R2's S3-compatible endpoint is account-scoped: https://<account_id>.r2.cloudflarestorage.com
+R2_ENDPOINT_URL = _env_str("R2_ENDPOINT_URL", f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if R2_ACCOUNT_ID else "")
+# Optional: only set if the bucket has a public custom domain / r2.dev subdomain attached.
+# Never required - files can always be served through our own streaming
+# endpoint instead, which is what keeps R2 credentials off the client.
+R2_PUBLIC_BASE_URL = _env_str("R2_PUBLIC_BASE_URL", "")
+
+# =============================================================================
 # VECTORSTORE SETTINGS
 # =============================================================================
 
@@ -771,6 +832,7 @@ __all__ = [
     "VECTORSTORE_DIR",
     "FEEDBACK_UPLOAD_DIR",
     "THUMBNAIL_DIR",
+    "R2_CACHE_DIR",
     "LOGS_DIR",
 
     # App
@@ -816,6 +878,11 @@ __all__ = [
     "OPENROUTER_MODEL",
     "OPENROUTER_TIMEOUT",
     "OPENROUTER_RATE_LIMIT_DELAY",
+    "OPENROUTER_MODEL_REASONING",
+    "OPENROUTER_MODEL_CODING",
+    "OPENROUTER_MODEL_CREATIVE",
+    "OPENROUTER_MODEL_LONG_CONTEXT",
+    "OPENROUTER_MODEL_SIMPLE",
 
     # HuggingFace
     "HUGGINGFACE_API_KEY",
@@ -824,6 +891,12 @@ __all__ = [
     "HUGGINGFACE_TIMEOUT",
     "HF_MODEL_REPO",
     "HF_TOKEN",
+
+    # Groq
+    "GROQ_API_KEY",
+    "GROQ_BASE_URL",
+    "GROQ_MODEL",
+    "GROQ_TIMEOUT",
 
     # Embeddings
     "EMBEDDING_BACKEND",
@@ -855,6 +928,15 @@ __all__ = [
     "MAX_FILE_SIZE_MB",
     "MAX_FILE_SIZE_BYTES",
     "ALLOWED_EXTENSIONS",
+
+    # Storage
+    "STORAGE_PROVIDER",
+    "R2_ACCOUNT_ID",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET_NAME",
+    "R2_ENDPOINT_URL",
+    "R2_PUBLIC_BASE_URL",
 
     # Vectorstore
     "VECTORSTORE_COLLECTION_NAME",
