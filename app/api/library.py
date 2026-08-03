@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.schemas import BookmarkOut, ReadingStatsOut, RecentDocumentOut
+from app.api.schemas import BookmarkOut, ReadingStatsOut, RecentDocumentOut, SearchHitOut
 from app.auth import get_current_user_id
 from app.db.repository import repository
+from app.services import reading_analytics_service, smart_search_service
 
 router = APIRouter(prefix="/library", tags=["library"])
 
@@ -26,8 +27,26 @@ def get_reading_analytics(user_id: str = Depends(get_current_user_id)):
     readiness already live on the Progress page and aren't duplicated
     here to avoid two different "readiness" numbers disagreeing with
     each other."""
-    stats = repository.get_reading_stats(user_id)
-    return ReadingStatsOut(**stats)
+    return ReadingStatsOut(**reading_analytics_service.get_stats(user_id))
+
+
+@router.get("/search", response_model=list[SearchHitOut])
+def search_library(
+    q: str, course_id: int | None = None, limit: int = 20,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Hybrid (semantic + keyword + metadata) search across everything the
+    student owns - document content, highlights, and bookmarks. See
+    app/services/smart_search_service.py."""
+    hits = smart_search_service.search(user_id, q, course_id=course_id, limit=min(limit, 50))
+    return [
+        SearchHitOut(
+            kind=h.kind, doc_id=h.doc_id, filename=h.filename, course_id=h.course_id,
+            snippet=h.snippet, score=h.score, section_title=h.section_title,
+            page_number=h.page_number, annotation_id=h.annotation_id,
+        )
+        for h in hits
+    ]
 
 
 @router.get("/recent", response_model=list[RecentDocumentOut])
