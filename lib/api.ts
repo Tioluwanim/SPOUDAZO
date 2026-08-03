@@ -218,6 +218,30 @@ export function getReadingAnalytics() {
   return request<ReadingStats>(`/library/analytics`);
 }
 
+/** The download endpoint requires auth, so a plain <a href download> can't
+ * carry the Bearer token (same reason AuthedThumbnail exists) - this
+ * fetches the bytes itself and triggers the browser's save dialog via a
+ * temporary object URL. */
+export async function downloadOriginalFile(courseId: number, docId: string, filename: string): Promise<void> {
+  const token = await getIdToken();
+  if (!token) throw new ApiRequestError(401, "You're signed out. Please sign in again.");
+
+  const res = await fetch(`${BASE_URL}/courses/${courseId}/materials/${docId}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new ApiRequestError(res.status, "Couldn't download this file");
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── Topics ───────────────────────────────────────────────────────────────
 
 export function extractTopics(courseId: number) {
@@ -272,11 +296,91 @@ export function getWeakAreas(courseId: number, limit = 10) {
   return request<WeakArea[]>(`/courses/${courseId}/weak-areas?limit=${limit}`);
 }
 
-export function sendCourseChat(courseId: number, message: string, history: ChatTurn[] = []) {
+export function sendCourseChat(
+  courseId: number,
+  message: string,
+  history: ChatTurn[] = [],
+  currentDocId?: string,
+  currentSectionIndex?: number
+) {
   return request<CourseChatResponse>(`/courses/${courseId}/chat`, {
     method: "POST",
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({
+      message,
+      history,
+      current_doc_id: currentDocId,
+      current_section_index: currentSectionIndex,
+    }),
   });
+}
+
+/**
+ * Streaming variant of sendCourseChat - consumes the SSE endpoint via
+ * fetch (not EventSource, which can't attach the Authorization header
+ * this endpoint requires). Calls onToken as each chunk arrives so the UI
+ * can render the answer incrementally instead of waiting for the whole
+ * thing, then onDone with the final metadata (sources/grounding, sent as
+ * the stream's first event since grounding is decided before generation
+ * starts).
+ */
+export async function streamCourseChat(
+  courseId: number,
+  message: string,
+  history: ChatTurn[],
+  handlers: {
+    onMeta?: (meta: { sources: string[]; grounding: CourseChatResponse["grounding"] }) => void;
+    onToken: (text: string) => void;
+    onDone?: () => void;
+    onError?: (message: string) => void;
+  },
+  currentDocId?: string,
+  currentSectionIndex?: number
+): Promise<void> {
+  const token = await getIdToken();
+  if (!token) throw new ApiRequestError(401, "You're signed out. Please sign in again.");
+
+  const res = await fetch(`${BASE_URL}/courses/${courseId}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      message,
+      history,
+      current_doc_id: currentDocId,
+      current_section_index: currentSectionIndex,
+    }),
+  });
+
+  if (!res.ok || !res.body) {
+    throw new ApiRequestError(res.status, "Couldn't reach the study assistant");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE frames are separated by a blank line; each frame is
+    // "event: <name>\ndata: <json>".
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || ""; // last piece may be incomplete - keep it for the next read
+
+    for (const frame of frames) {
+      const eventLine = frame.split("\n").find((l) => l.startsWith("event:"));
+      const dataLine = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!eventLine || !dataLine) continue;
+      const event = eventLine.slice("event:".length).trim();
+      const data = dataLine.slice("data:".length).trim();
+
+      if (event === "meta") handlers.onMeta?.(JSON.parse(data));
+      else if (event === "token") handlers.onToken(JSON.parse(data).text);
+      else if (event === "error") handlers.onError?.(JSON.parse(data).message);
+      else if (event === "done") handlers.onDone?.();
+    }
+  }
 }
 
 // ── Study Planner ─────────────────────────────────────────────────────────
