@@ -16,7 +16,7 @@ const DEFAULT_WIDTH = 360;
  * pushing a toolbar result into the panel means they have to be the
  * same state, not two independent copies.
  */
-export function ReaderAIPanel({ chat }: { chat: CourseChatState }) {
+export function AIAssistantPanel({ chat }: { chat: CourseChatState }) {
   const [collapsed, setCollapsed] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const { messages, input, setInput, sending, send } = chat;
