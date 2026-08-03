@@ -34,7 +34,7 @@ export interface MaterialDetail {
   sections: DocumentSection[];
 }
 
-export type AnnotationKind = "highlight" | "bookmark";
+export type AnnotationKind = "highlight" | "bookmark" | "sticky_note";
 
 export interface Annotation {
   id: number;
