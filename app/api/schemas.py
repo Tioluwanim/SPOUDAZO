@@ -140,6 +140,8 @@ class ChatTurn(BaseModel):
 class CourseChatRequest(BaseModel):
     message: str
     history: list[ChatTurn] = []
+    current_doc_id: str | None = None        # set when the message came from the reader's docked panel
+    current_section_index: int | None = None
 
 
 class CourseChatResponse(BaseModel):
@@ -283,6 +285,18 @@ class ReadingStatsOut(BaseModel):
     highlight_count: int
     bookmark_count: int
     favorite_count: int
+
+
+class SearchHitOut(BaseModel):
+    kind: str  # "content" | "highlight" | "bookmark"
+    doc_id: str
+    filename: str
+    course_id: int
+    snippet: str
+    score: float
+    section_title: str = ""
+    page_number: int | None = None
+    annotation_id: int | None = None
 
 
 class TextActionRequest(BaseModel):
