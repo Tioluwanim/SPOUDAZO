@@ -45,6 +45,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Spoudazõ API",
+    description="Backend API powering the Spoudazõ AI learning platform.",
+    version="1.0.0",
     debug=DEBUG,
     lifespan=lifespan,
 )
@@ -57,15 +59,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Feedback screenshots are saved to disk (see app/api/feedback.py) and
-# served back from this same path - no separate object storage needed at
-# beta scale.
-app.mount("/feedback-uploads", StaticFiles(directory=str(FEEDBACK_UPLOAD_DIR)), name="feedback-uploads")
+# Feedback screenshots are saved to disk (see app/api/feedback.py)
+# and served from this path.
+app.mount(
+    "/feedback-uploads",
+    StaticFiles(directory=str(FEEDBACK_UPLOAD_DIR)),
+    name="feedback-uploads",
+)
 
 
+# ------------------------------------------------------------------
+# Root Endpoint
+# ------------------------------------------------------------------
+@app.get("/", tags=["Root"])
+async def root():
+    return {
+        "name": "Spoudazõ API",
+        "status": "running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "redoc": "/redoc",
+        "health": "/health",
+    }
+
+
+# ------------------------------------------------------------------
+# Health Check
+# ------------------------------------------------------------------
 @app.get("/health", tags=["Health"])
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "service": "Spoudazõ API",
+        "version": "1.0.0",
+    }
 
 
 # Import routers after app creation
