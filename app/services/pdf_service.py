@@ -12,6 +12,8 @@ from app.config import (
     UPLOAD_DIR,
     PROCESSED_DIR,
     THUMBNAIL_DIR,
+    R2_CACHE_DIR,
+    STORAGE_PROVIDER,
     MAX_FILE_SIZE_BYTES,
     MAX_FILE_SIZE_MB,
     ALLOWED_EXTENSIONS,
@@ -24,6 +26,7 @@ from app.models.schemas import (
     UploadResponse,
     ErrorResponse,
 )
+from app.services.storage import storage_service
 from app.utils.logger import get_logger, ServiceLogger
 
 logger = get_logger(__name__)
@@ -142,21 +145,28 @@ class PDFService:
                 detail="File does not appear to be a valid PDF.",
             )
 
-        # ── Save to disk ──────────────────────────────────────────────────────
-        doc_id    = str(uuid.uuid4())
-        safe_name = self._sanitize_filename(filename)
-        dest_path = self.upload_dir / f"{doc_id}_{safe_name}"
+        # ── Save via StorageService ──────────────────────────────────────────
+        doc_id     = str(uuid.uuid4())
+        safe_name  = self._sanitize_filename(filename)
+        storage_key = f"{doc_id}_{safe_name}"
 
         slog = ServiceLogger("pdf_service", doc_id=doc_id)
 
-        # ── Save to disk ──────────────────────────────────────────────────────
         try:
-            dest_path.write_bytes(file_bytes)
-            slog.info(f"Saved '{filename}' → {dest_path} ({file_size:,} bytes)")
-        except OSError as e:
+            storage_url = storage_service.upload(storage_key, file_bytes, content_type="application/pdf")
+        except Exception as e:
             msg = f"Failed to save file: {e}"
             slog.error(msg)
             return None, ErrorResponse(error="Storage error", detail=msg, doc_id=doc_id)
+
+        # local_path stays a real, directly-readable filesystem path for the
+        # local provider (StorageService writes to UPLOAD_DIR/storage_key,
+        # exactly where this used to write it directly) - every existing
+        # consumer of local_path/file_path (extraction, thumbnails) keeps
+        # working unchanged. For the r2 provider it's not a real local path;
+        # get_local_file_path() below is what those consumers should move to.
+        dest_path = self.upload_dir / storage_key
+        slog.info(f"Saved '{filename}' via {STORAGE_PROVIDER} provider → key={storage_key} ({file_size:,} bytes)")
 
         # ── Build ProcessedDocument ───────────────────────────────────────────
         doc = ProcessedDocument(
@@ -176,6 +186,9 @@ class PDFService:
             source_folder  = None,
             drive_file_id  = None,
             checksum       = checksum,
+            storage_provider = STORAGE_PROVIDER,
+            storage_key      = storage_key,
+            storage_url      = storage_url,
             modified_time  = None,
             source         = "upload",
         )
@@ -326,20 +339,40 @@ class PDFService:
         doc    = self.load_document(doc_id)
         found  = False
 
-        if doc and Path(doc.file_path).exists():
+        db_doc = self.repository.get_document_by_doc_id(doc_id)
+        if db_doc and db_doc.storage_key:
+            # Route through StorageService rather than unlinking
+            # doc.file_path directly - for an r2-provider document,
+            # file_path is either a local scratch cache (safe to also
+            # remove below) or nothing at all; the actual object only
+            # gets deleted by going through the provider that owns it.
+            try:
+                if storage_service.delete(db_doc.storage_key):
+                    slog.info(f"Deleted original file from {db_doc.storage_provider or 'local'} storage")
+                    found = True
+            except Exception as e:
+                slog.error(f"Failed to delete from storage: {e}")
+        elif doc and Path(doc.file_path).exists():
+            # Legacy row with no storage_key (predates StorageService) -
+            # same direct unlink this always did.
             Path(doc.file_path).unlink()
-            slog.info("Deleted uploaded PDF")
+            slog.info("Deleted uploaded PDF (legacy direct path)")
             found = True
 
-        if doc and doc.vector_index_path:
-            idx_path = Path(doc.vector_index_path)
-            if idx_path.exists():
-                if idx_path.is_dir():
-                    shutil.rmtree(idx_path)
-                else:
-                    idx_path.unlink()
-                slog.info("Deleted vector index")
-                found = True
+        # Clean up the local R2 scratch cache too, if get_local_file_path
+        # ever populated one for this document.
+        cache_path = R2_CACHE_DIR / f"{doc_id}_{Path(doc.file_path).name}" if doc else None
+        if cache_path and cache_path.exists():
+            cache_path.unlink()
+            found = True
+
+        # rag_service.delete_index (not a raw shutil.rmtree here) so its
+        # in-memory FAISS/BM25 caches are invalidated too - deleting only
+        # the files on disk would leave chat/search still "finding" this
+        # document's content out of a stale cache until the next restart.
+        from app.services.rag_service import rag_service
+        if rag_service.delete_index(doc_id):
+            found = True
 
         if self.repository.delete_document(doc_id):
             slog.info("Deleted document record from database")
@@ -373,6 +406,52 @@ class PDFService:
         doc = self.load_document(doc_id)
         return doc is not None and doc.status == DocumentStatus.READY
 
+    def get_local_file_path(self, doc_id: str) -> Path | None:
+        """
+        Returns a real, directly-readable local filesystem path for this
+        document's original file - even when storage_provider="r2".
+
+        For local-provider documents (including every document created
+        before this feature existed, since storage_provider is NULL on
+        those rows and NULL is treated as "local"), this is just
+        Document.local_path - no network call, no behavior change.
+
+        For r2-provider documents, R2 is the durable source of truth but
+        the existing extraction/thumbnail code is written against real
+        file paths (fitz.open(path), etc.) - rewriting that code to
+        stream everything is a much bigger change than this app's
+        existing pipeline needs right now. Instead, this downloads once
+        into R2_CACHE_DIR (ephemeral scratch space, safe to lose - it's
+        regenerated from R2 on demand) and returns that cached path on
+        every subsequent call.
+        """
+        document = self.repository.get_document_by_doc_id(doc_id)
+        if document is None:
+            return None
+
+        if document.storage_provider in (None, "", "local"):
+            path = Path(document.local_path)
+            return path if path.exists() else None
+
+        # r2 (or any future non-local provider)
+        cache_path = R2_CACHE_DIR / f"{doc_id}_{Path(document.local_path).name}"
+        if cache_path.exists():
+            return cache_path
+
+        if not document.storage_key:
+            logger.error(f"[{doc_id}] storage_provider={document.storage_provider!r} but no storage_key set")
+            return None
+
+        try:
+            data = storage_service.download(document.storage_key)
+        except Exception as e:
+            logger.error(f"[{doc_id}] Failed to download from {document.storage_provider}: {e}")
+            return None
+
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_bytes(data)
+        return cache_path
+
     def get_page_thumbnail(self, doc_id: str, page_number: int, target_width: int = 320) -> Path | None:
         """
         Renders (and caches to disk) a low-res PNG of one page, for the
@@ -390,8 +469,8 @@ class PDFService:
         if cache_path.exists():
             return cache_path
 
-        doc = self.load_document(doc_id)
-        if doc is None or not Path(doc.file_path).exists():
+        file_path = self.get_local_file_path(doc_id)
+        if file_path is None:
             return None
 
         try:
@@ -402,7 +481,7 @@ class PDFService:
             return None
 
         try:
-            with fitz.open(doc.file_path) as pdf:
+            with fitz.open(str(file_path)) as pdf:
                 if not (1 <= page_number <= pdf.page_count):
                     return None
                 page = pdf[page_number - 1]  # fitz pages are 0-indexed
