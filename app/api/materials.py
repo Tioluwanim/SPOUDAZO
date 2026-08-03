@@ -22,10 +22,10 @@ from __future__ import annotations
 
 import hashlib
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 
-from app.api.deps import require_course_owner, require_document_owner
+from app.api.deps import require_course_owner
 from app.api.schemas import (
     AnnotationCreate,
     AnnotationOut,
@@ -38,14 +38,16 @@ from app.api.schemas import (
     TextActionRequest,
     TextActionResponse,
 )
-from app.agents.text_actions import ALL_ACTIONS, run_text_action
+from app.agents.text_actions import ALL_ACTIONS
 from app.auth import get_current_user_id
 from app.db.repository import repository
 from app.models.schemas import DocumentStatus
 from app.rate_limit import rate_limit
+from app.services import annotation_service, reader_service, reading_analytics_service
 from app.services.extraction_service import extraction_service
 from app.services.pdf_service import pdf_service
 from app.services.rag_service import rag_service
+from app.services.text_action_cache import get_or_run_text_action
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -164,10 +166,7 @@ def get_material(course_id: int, doc_id: str, user_id: str = Depends(get_current
     document (title + sections with page ranges), not the raw file. Sections
     already exist from the extraction pipeline; this just exposes them
     instead of re-deriving anything."""
-    document = _require_readable_document(course_id, doc_id, user_id)
-    processed = pdf_service.load_document(doc_id)
-    if processed is None:
-        raise HTTPException(404, "Document not found")
+    document, processed = reader_service.get_reader_document(course_id, doc_id, user_id)
 
     return MaterialDetailOut(
         doc_id=processed.doc_id,
@@ -190,26 +189,6 @@ def get_material(course_id: int, doc_id: str, user_id: str = Depends(get_current
     )
 
 
-def _require_readable_document(course_id: int, doc_id: str, user_id: str):
-    """Shared by every reader endpoint below - the document must exist,
-    belong to this course, be owned by this user, AND be fully processed.
-    Annotations/favorites/progress/text-actions on a still-processing
-    document don't make sense (there's nothing stable to anchor a
-    section_index to yet), so this is stricter than require_document_owner
-    alone."""
-    require_course_owner(course_id, user_id)
-    document = require_document_owner(doc_id, user_id)
-    if document.course_id != course_id:
-        raise HTTPException(404, "Document not found")
-    if document.status != DocumentStatus.READY.value:
-        raise HTTPException(
-            409,
-            f"Document is still processing (status: {document.status}) - "
-            "try again once it finishes.",
-        )
-    return document
-
-
 # ── Annotations (highlights & bookmarks) ────────────────────────────────────
 
 @router.post("/{doc_id}/annotations", response_model=AnnotationOut)
@@ -217,16 +196,8 @@ def create_annotation(
     course_id: int, doc_id: str, body: AnnotationCreate,
     user_id: str = Depends(get_current_user_id),
 ):
-    _require_readable_document(course_id, doc_id, user_id)
-    if body.kind not in ("highlight", "bookmark"):
-        raise HTTPException(422, "kind must be 'highlight' or 'bookmark'")
-    if not body.quote.strip():
-        raise HTTPException(422, "quote cannot be empty")
-
-    ann = repository.create_annotation(
-        user_id=user_id, doc_id=doc_id, kind=body.kind,
-        section_index=body.section_index, quote=body.quote.strip(),
-        note=body.note.strip() if body.note else None,
+    ann = annotation_service.create(
+        course_id, doc_id, user_id, body.kind, body.section_index, body.quote, body.note,
     )
     return AnnotationOut(
         id=ann.id, doc_id=ann.doc_id, kind=ann.kind, section_index=ann.section_index,
@@ -239,8 +210,7 @@ def list_annotations(
     course_id: int, doc_id: str, kind: str | None = None,
     user_id: str = Depends(get_current_user_id),
 ):
-    _require_readable_document(course_id, doc_id, user_id)
-    rows = repository.list_annotations(user_id, doc_id, kind=kind)
+    rows = annotation_service.list_for_document(course_id, doc_id, user_id, kind=kind)
     return [
         AnnotationOut(
             id=a.id, doc_id=a.doc_id, kind=a.kind, section_index=a.section_index,
@@ -255,32 +225,23 @@ def delete_annotation(
     course_id: int, doc_id: str, annotation_id: int,
     user_id: str = Depends(get_current_user_id),
 ):
-    _require_readable_document(course_id, doc_id, user_id)
-    ann = repository.get_annotation(annotation_id)
-    if ann is None or ann.doc_id != doc_id or ann.user_id != user_id:
-        raise HTTPException(404, "Annotation not found")
-    repository.delete_annotation(annotation_id)
+    annotation_service.delete(course_id, doc_id, annotation_id, user_id)
 
 
 # ── Favorites ────────────────────────────────────────────────────────────────
 
 @router.post("/{doc_id}/favorite", response_model=FavoriteToggleOut)
 def toggle_favorite(course_id: int, doc_id: str, user_id: str = Depends(get_current_user_id)):
-    require_course_owner(course_id, user_id)
-    document = require_document_owner(doc_id, user_id)
-    if document.course_id != course_id:
-        raise HTTPException(404, "Document not found")
+    reader_service.require_readable_document(course_id, doc_id, user_id)
     favorited = repository.toggle_favorite(user_id, doc_id)
     return FavoriteToggleOut(doc_id=doc_id, favorited=favorited)
 
 
 # ── Reading progress ─────────────────────────────────────────────────────────
 
-# ── Reading progress ─────────────────────────────────────────────────────────
-
 @router.get("/{doc_id}/progress", response_model=ReadingProgressOut | None)
 def get_reading_progress(course_id: int, doc_id: str, user_id: str = Depends(get_current_user_id)):
-    _require_readable_document(course_id, doc_id, user_id)
+    reader_service.require_readable_document(course_id, doc_id, user_id)
     row = repository.get_reading_progress(user_id, doc_id)
     if row is None:
         return None
@@ -295,16 +256,12 @@ def update_reading_progress(
     course_id: int, doc_id: str, body: ReadingProgressIn,
     user_id: str = Depends(get_current_user_id),
 ):
-    _require_readable_document(course_id, doc_id, user_id)
+    reader_service.require_readable_document(course_id, doc_id, user_id)
     if not (0 <= body.progress_percent <= 100):
         raise HTTPException(422, "progress_percent must be between 0 and 100")
-    row = repository.upsert_reading_progress(
-        user_id, doc_id, body.last_section_index, body.progress_percent,
+    row = reading_analytics_service.record_progress(
+        user_id, doc_id, body.last_section_index, body.progress_percent, body.seconds_delta,
     )
-    # Cap a single delta at 10 minutes - a stale browser tab reporting a
-    # huge gap (laptop was asleep, tab was backgrounded for hours) should
-    # not count as ten hours of actual reading.
-    repository.record_reading_activity(user_id, min(body.seconds_delta, 600))
     return ReadingProgressOut(
         doc_id=doc_id, last_section_index=row.last_section_index,
         progress_percent=row.progress_percent, last_viewed_at=row.last_viewed_at,
@@ -319,12 +276,11 @@ def text_action(
     user_id: str = Depends(get_current_user_id),
     _rl: None = Depends(rate_limit("reader_text_action", max_calls=60, window_seconds=300)),
 ):
-    """Backs the reader's highlight-to-ask toolbar - explain / simplify /
-    example / analogy / summarize / mnemonic / flashcards / key points.
-    See app/agents/text_actions.py for the full action list and why
-    quiz/theory/CBT-from-selection and Visualize aren't here yet."""
-    require_course_owner(course_id, user_id)
-    document = _require_readable_document(course_id, doc_id, user_id)
+    """Backs the reader's highlight-to-ask toolbar. See
+    app/agents/text_actions.py for the full action list, and
+    app/services/text_action_cache.py for why repeated identical requests
+    don't re-hit the LLM."""
+    reader_service.require_readable_document(course_id, doc_id, user_id)
 
     if body.action not in ALL_ACTIONS:
         raise HTTPException(422, f"Unknown action - expected one of {sorted(ALL_ACTIONS)}")
@@ -337,7 +293,7 @@ def text_action(
     course_context = f"{course.code} {course.name}" if course else ""
 
     try:
-        outcome = run_text_action(
+        outcome = get_or_run_text_action(
             action=body.action,
             selected_text=body.selected_text,
             doc_id=doc_id,
@@ -361,8 +317,67 @@ def get_page_thumbnail(
     course_id: int, doc_id: str, page_number: int,
     user_id: str = Depends(get_current_user_id),
 ):
-    _require_readable_document(course_id, doc_id, user_id)
-    path = pdf_service.get_page_thumbnail(doc_id, page_number)
-    if path is None:
-        raise HTTPException(404, "No thumbnail available for that page")
+    path = reader_service.get_page_thumbnail_path(course_id, doc_id, page_number, user_id)
     return FileResponse(str(path), media_type="image/png")
+
+
+# ── Original file (PDF mode / download) ─────────────────────────────────────
+
+@router.get("/{doc_id}/file")
+def stream_original_file(
+    course_id: int, doc_id: str, request: Request,
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Original PDF mode's data source. Honors HTTP Range requests (what
+    react-pdf/pdf.js issue for lazy page-by-page loading) - the response
+    is 206 Partial Content with Content-Range when a Range header is
+    present, 200 with the full body otherwise. Never downloads a whole
+    r2-stored file server-side just to serve one requested range (see
+    reader_service.get_original_file_stream / StorageService.stream).
+    """
+    range_header = request.headers.get("range")
+    byte_iter, start, end, total_size, filename, mime_type = reader_service.get_original_file_stream(
+        course_id, doc_id, user_id, range_header,
+    )
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+
+    if range_header:
+        headers["Content-Range"] = f"bytes {start}-{end}/{total_size}"
+        return StreamingResponse(byte_iter, status_code=206, media_type=mime_type, headers=headers)
+
+    return StreamingResponse(byte_iter, status_code=200, media_type=mime_type, headers=headers)
+
+
+@router.get("/{doc_id}/download")
+def download_original_file(
+    course_id: int, doc_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Same source as /file, but forces a download instead of inline
+    viewing (Content-Disposition: attachment) and never partial - a
+    download should always be the complete file."""
+    byte_iter, start, end, total_size, filename, mime_type = reader_service.get_original_file_stream(
+        course_id, doc_id, user_id, range_header=None,
+    )
+    headers = {
+        "Content-Length": str(total_size),
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    return StreamingResponse(byte_iter, status_code=200, media_type=mime_type, headers=headers)
+
+
+@router.delete("/{doc_id}", status_code=204)
+def delete_material(
+    course_id: int, doc_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Deletes the original file (from whichever storage provider owns
+    it), the FAISS/BM25 index (with proper in-memory cache invalidation,
+    not just the files on disk), and the database record."""
+    reader_service.delete_document(course_id, doc_id, user_id)
