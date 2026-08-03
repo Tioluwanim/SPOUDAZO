@@ -61,6 +61,24 @@ def init_db() -> None:
     Index("ix_documents_course_checksum", Document.course_id, Document.checksum).create(
         bind=engine, checkfirst=True
     )
+    _ensure_document_storage_columns()
+
+
+def _ensure_document_storage_columns() -> None:
+    """Adds storage_provider/storage_key/storage_url to `documents` for
+    databases that had this table before the R2 storage feature existed -
+    create_all() never alters an existing table, so this is the same
+    idempotent-ALTER-TABLE pattern as Repository._ensure_sync_run_schema
+    below, just run once at startup rather than lazily."""
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("documents")}
+    with engine.begin() as conn:
+        if "storage_provider" not in columns:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN storage_provider VARCHAR(16)"))
+        if "storage_key" not in columns:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN storage_key VARCHAR(1024)"))
+        if "storage_url" not in columns:
+            conn.execute(text("ALTER TABLE documents ADD COLUMN storage_url VARCHAR(2048)"))
 
 
 class Repository:
@@ -92,6 +110,9 @@ class Repository:
         modified_time: datetime | None = None,
         source: str = "upload",
         status: DocumentStatus | str = DocumentStatus.UPLOADED,
+        storage_provider: str | None = None,
+        storage_key: str | None = None,
+        storage_url: str | None = None,
     ) -> Document:
         if isinstance(status, DocumentStatus):
             status_value = status.value
@@ -109,6 +130,9 @@ class Repository:
                 checksum=checksum or "",
                 modified_time=modified_time,
                 status=status_value,
+                storage_provider=storage_provider,
+                storage_key=storage_key,
+                storage_url=storage_url,
             )
             session.add(doc)
             session.flush()
@@ -810,6 +834,23 @@ class Repository:
                 for r in rows
             ]
 
+    def get_user_ready_documents(self, user_id: str, course_id: int | None = None) -> list[dict]:
+        """Every READY document this user owns, across every course they
+        have (or scoped to one course_id) - what library-wide search
+        scopes itself to, so a search never surfaces another student's
+        material even though the vector index itself has no per-user
+        partitioning."""
+        with self.session() as session:
+            stmt = (
+                select(Document.doc_id, Document.filename, Document.course_id)
+                .join(Course, Course.id == Document.course_id)
+                .where(Course.user_id == user_id, Document.status == DocumentStatus.READY.value)
+            )
+            if course_id is not None:
+                stmt = stmt.where(Document.course_id == course_id)
+            rows = session.execute(stmt).all()
+            return [{"doc_id": r.doc_id, "filename": r.filename, "course_id": r.course_id} for r in rows]
+
     def get_ready_document_by_checksum(self, course_id: int, checksum: str) -> Document | None:
         """Finds an already-processed document with identical content in
         this course, so a re-upload (double-click, retry after a refresh,
@@ -1304,6 +1345,29 @@ class Repository:
                 return False
             session.delete(ann)
             return True
+
+    def search_annotations(self, user_id: str, query: str, limit: int = 20) -> list[Annotation]:
+        """Text match against a student's own highlights/bookmarks -
+        Smart Search's "search by bookmarks, highlights" requirement.
+        Matches per-word (AND across all words), not one contiguous
+        substring - a query like "mitochondria ATP" should match a quote
+        containing both words even if other words sit between them in the
+        text, the same way a person would expect a search to behave.
+        Simple ILIKE, not embeddings - annotation text is short and this
+        is a small per-user table, not worth a second vector index."""
+        words = [w for w in query.split() if w]
+        if not words:
+            return []
+        with self.session() as session:
+            stmt = select(Annotation).where(Annotation.user_id == user_id)
+            for word in words:
+                like = f"%{word}%"
+                stmt = stmt.where((Annotation.quote.ilike(like)) | (Annotation.note.ilike(like)))
+            stmt = stmt.order_by(Annotation.created_at.desc()).limit(limit)
+            rows = session.execute(stmt).scalars().all()
+            for r in rows:
+                session.expunge(r)
+            return rows
 
     # ── Favorites ────────────────────────────────────────────────────────────
 
