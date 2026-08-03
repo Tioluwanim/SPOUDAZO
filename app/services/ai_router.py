@@ -1,11 +1,22 @@
 """
-ai_router.py - Production LLM router. Fully verified endpoints March 2026.
+ai_router.py - Production LLM router. OpenRouter/HuggingFace endpoints
+verified March 2026; Groq added later and not exercised against a live
+endpoint from this environment (no network access to Groq's API here) -
+verify GROQ_MODEL against Groq's current free-tier catalog before relying
+on it in production, same caveat as this app's Cloudflare R2 provider.
 
 PRIMARY  → OpenRouter  https://openrouter.ai/api/v1
-           Model: "openrouter/free"
-           OpenRouter's official free-models router. Never returns 404.
-           Automatically selects from all currently live free models.
+           Model: "openrouter/free" by default, or a task-specific
+           override (see OPENROUTER_MODEL_* in config.py) - see
+           app.services.task_classifier for how a message's task type is
+           inferred. OpenRouter's free-models router never returns 404;
+           it auto-selects from all currently live free models.
            Docs: https://openrouter.ai/docs/guides/routing/routers/free-models-router
+
+SECOND   → Groq  https://api.groq.com/openai/v1
+           A genuinely separate free-tier provider, not another route to
+           the OpenRouter aggregator - if OpenRouter's free router is
+           degraded, this is a real independent second opinion.
 
 FALLBACK → HuggingFace Inference Providers  https://router.huggingface.co/v1
            Model: "meta-llama/Llama-3.1-8B-Instruct:cerebras"
@@ -13,7 +24,7 @@ FALLBACK → HuggingFace Inference Providers  https://router.huggingface.co/v1
            OpenAI-compatible. Token needs "Make calls to Inference Providers" scope.
            Docs: https://huggingface.co/docs/inference-providers
 
-Both use the openai SDK — identical interface for streaming and non-streaming.
+All three use the openai SDK — identical interface for streaming and non-streaming.
 """
 
 from __future__ import annotations
@@ -25,8 +36,17 @@ from typing import Generator, Iterator
 from app.config import (
     OPENROUTER_API_KEY,
     OPENROUTER_MODEL,
+    OPENROUTER_MODEL_REASONING,
+    OPENROUTER_MODEL_CODING,
+    OPENROUTER_MODEL_CREATIVE,
+    OPENROUTER_MODEL_LONG_CONTEXT,
+    OPENROUTER_MODEL_SIMPLE,
     OPENROUTER_TIMEOUT,
     OPENROUTER_RATE_LIMIT_DELAY,
+    GROQ_API_KEY,
+    GROQ_MODEL,
+    GROQ_BASE_URL,
+    GROQ_TIMEOUT,
     HUGGINGFACE_API_KEY,
     HUGGINGFACE_MODEL,
     HUGGINGFACE_BASE_URL,
@@ -37,6 +57,7 @@ from app.config import (
     RETRY_MAX_ATTEMPTS,
 )
 from app.models.schemas import ChatMessage, ChatResponse, LLMProvider
+from app.services.task_classifier import TaskType
 from app.utils.logger import get_logger, ServiceLogger
 
 logger = get_logger(__name__)
@@ -105,6 +126,30 @@ def _build_huggingface_client():
     )
 
 
+def _build_groq_client():
+    """OpenAI-compatible client pointed at Groq's API - same SDK, different
+    base_url, same pattern as OpenRouter/HuggingFace above."""
+    from openai import OpenAI
+    return OpenAI(
+        api_key  = GROQ_API_KEY,
+        base_url = GROQ_BASE_URL,
+        timeout  = GROQ_TIMEOUT,
+    )
+
+
+# ── Task-based model selection ────────────────────────────────────────────────
+# Maps a task type to its OpenRouter model override; empty string means "no
+# override configured for this task", so the caller falls back to the
+# default model. See config.py for why these all default to "".
+_TASK_MODEL_OVERRIDES: dict[str, str] = {
+    "reasoning": OPENROUTER_MODEL_REASONING,
+    "coding": OPENROUTER_MODEL_CODING,
+    "creative": OPENROUTER_MODEL_CREATIVE,
+    "long_context": OPENROUTER_MODEL_LONG_CONTEXT,
+    "simple": OPENROUTER_MODEL_SIMPLE,
+}
+
+
 class AIRouter:
     """
     Routes LLM requests with automatic fallback.
@@ -114,11 +159,12 @@ class AIRouter:
     def __init__(self) -> None:
         self._or_client = None
         self._hf_client = None
+        self._groq_client = None
         # Use configured model or fall back to free router
         self._or_model = OPENROUTER_MODEL or _OR_FREE_ROUTER
         logger.info(
-            "AIRouter ready — OR model=%s  HF model=%s  HF url=%s",
-            self._or_model, HUGGINGFACE_MODEL, HUGGINGFACE_BASE_URL,
+            "AIRouter ready — OR model=%s  Groq model=%s (configured=%s)  HF model=%s  HF url=%s",
+            self._or_model, GROQ_MODEL, bool(GROQ_API_KEY), HUGGINGFACE_MODEL, HUGGINGFACE_BASE_URL,
         )
 
     # ── Lazy clients ──────────────────────────────────────────────────────────
@@ -135,6 +181,22 @@ class AIRouter:
             self._hf_client = _build_huggingface_client()
         return self._hf_client
 
+    @property
+    def groq_client(self):
+        if self._groq_client is None:
+            self._groq_client = _build_groq_client()
+        return self._groq_client
+
+    def _model_for_task(self, task_type: TaskType | None) -> str:
+        """Resolves which OpenRouter model to use for this request - a
+        task-specific override if one is configured, otherwise the same
+        default model every request has always used."""
+        if task_type:
+            override = _TASK_MODEL_OVERRIDES.get(task_type, "")
+            if override:
+                return override
+        return self._or_model
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def chat(
@@ -145,35 +207,39 @@ class AIRouter:
         doc_id   : str  = "",
         stream   : bool = True,
         system_addendum: str = "",
+        task_type: TaskType | None = None,
     ) -> Generator[str, None, None] | ChatResponse:
         slog     = ServiceLogger("ai_router", doc_id=doc_id)
         messages = self._build_messages(question, context, history, system_addendum)
-        slog.info("Chat — stream=%s  q='%s'", stream, question[:60])
+        model    = self._model_for_task(task_type)
+        slog.info("Chat — stream=%s  task=%s  model=%s  q='%s'", stream, task_type or "default", model, question[:60])
 
         if stream:
-            return self._stream_with_fallback(messages, slog)
-        return self._complete_with_fallback(messages, question, doc_id, slog)
+            return self._stream_with_fallback(messages, slog, model)
+        return self._complete_with_fallback(messages, question, doc_id, slog, model)
 
     def complete_custom(
         self,
         system_prompt: str,
         user_prompt  : str,
         doc_id       : str = "",
+        task_type    : TaskType | None = None,
     ) -> str:
         """
-        Same OpenRouter → HuggingFace fallback as chat(), but with a caller-
-        supplied system prompt instead of the hardcoded research-assistant
-        one. Used by app/agents/* (topic extraction, question generation,
-        grading) which each need a different, task-specific system prompt.
-        Always non-streaming — these are structured/JSON generation tasks,
-        not chat.
+        Same OpenRouter → Groq → HuggingFace fallback as chat(), but with a
+        caller-supplied system prompt instead of the hardcoded research-
+        assistant one. Used by app/agents/* (topic extraction, question
+        generation, grading, text actions) which each need a different,
+        task-specific system prompt. Always non-streaming — these are
+        structured/JSON generation tasks, not chat.
         """
         slog = ServiceLogger("ai_router", doc_id=doc_id)
+        model = self._model_for_task(task_type)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-        response = self._complete_with_fallback(messages, user_prompt, doc_id, slog)
+        response = self._complete_with_fallback(messages, user_prompt, doc_id, slog, model)
         return response.answer
 
     def get_provider_status(self) -> dict:
@@ -181,6 +247,11 @@ class AIRouter:
             "openrouter" : {
                 "configured": bool(OPENROUTER_API_KEY),
                 "model"     : self._or_model,
+                "task_overrides": {k: v for k, v in _TASK_MODEL_OVERRIDES.items() if v},
+            },
+            "groq": {
+                "configured": bool(GROQ_API_KEY),
+                "model"     : GROQ_MODEL,
             },
             "huggingface": {
                 "configured": bool(HUGGINGFACE_API_KEY),
@@ -194,29 +265,58 @@ class AIRouter:
         self,
         messages : list[dict],
         slog     : ServiceLogger,
+        model    : str,
     ) -> Generator[str, None, None]:
+        # Peek the first chunk rather than list(generator) - buffering the
+        # WHOLE response before yielding anything would make this
+        # indistinguishable from a blocking call to the caller (nothing
+        # shown until generation finishes, then everything at once). We
+        # still need SOME way to detect "this provider returned nothing at
+        # all" to fall through to the next one, so we consume exactly one
+        # chunk to check, then yield it and continue lazily from there.
 
         # Primary: OpenRouter
         if OPENROUTER_API_KEY:
             try:
-                slog.info("Streaming via OpenRouter (%s) …", self._or_model)
-                tokens = list(self._stream_openrouter(messages, slog))
-                if tokens:
-                    yield from tokens
+                slog.info("Streaming via OpenRouter (%s) …", model)
+                gen = self._stream_openrouter(messages, slog, model)
+                first_chunk = next(gen, None)
+                if first_chunk is not None:
+                    yield first_chunk
+                    yield from gen
                     return
-                slog.warning("OpenRouter returned empty stream — trying HuggingFace")
+                slog.warning("OpenRouter returned empty stream — trying Groq")
             except Exception as e:
                 _log_error("OpenRouter", e, slog)
         else:
             slog.warning("OPENROUTER_API_KEY not set — skipping primary")
 
+        # Second: Groq - a genuinely separate provider, not another route
+        # through the same OpenRouter aggregator.
+        if GROQ_API_KEY:
+            try:
+                slog.info("Streaming via Groq (%s) …", GROQ_MODEL)
+                gen = self._stream_groq(messages, slog)
+                first_chunk = next(gen, None)
+                if first_chunk is not None:
+                    yield first_chunk
+                    yield from gen
+                    return
+                slog.warning("Groq returned empty stream — trying HuggingFace")
+            except Exception as e:
+                _log_error("Groq", e, slog)
+        else:
+            slog.warning("GROQ_API_KEY not set — skipping second provider")
+
         # Fallback: HuggingFace
         if HUGGINGFACE_API_KEY:
             try:
                 slog.info("Streaming via HuggingFace (%s) …", HUGGINGFACE_MODEL)
-                tokens = list(self._stream_huggingface(messages, slog))
-                if tokens:
-                    yield from tokens
+                gen = self._stream_huggingface(messages, slog)
+                first_chunk = next(gen, None)
+                if first_chunk is not None:
+                    yield first_chunk
+                    yield from gen
                     return
                 slog.error("HuggingFace also returned empty stream")
             except Exception as e:
@@ -225,7 +325,7 @@ class AIRouter:
             slog.warning("HUGGINGFACE_API_KEY not set — skipping fallback")
 
         yield (
-            "⚠️ Both LLM providers are currently unavailable. "
+            "⚠️ All LLM providers are currently unavailable. "
             "Please verify your API keys in the .env file. "
             "OpenRouter key must start with 'sk-or-'. "
             "HuggingFace token must have 'Make calls to Inference Providers' permission."
@@ -235,11 +335,12 @@ class AIRouter:
         self,
         messages : list[dict],
         slog     : ServiceLogger,
+        model    : str,
     ) -> Iterator[str]:
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             try:
                 resp = self.or_client.chat.completions.create(
-                    model      = self._or_model,
+                    model      = model,
                     messages   = messages,
                     max_tokens = MAX_TOKENS,
                     temperature= max(float(TEMPERATURE), 0.01),
@@ -273,6 +374,55 @@ class AIRouter:
                     delay = 2 ** (attempt - 1)
                     slog.warning(
                         "OpenRouter transient error attempt %d/%d: %s — retry in %ds",
+                        attempt, RETRY_MAX_ATTEMPTS, e, delay,
+                    )
+                    time.sleep(delay)
+                else:
+                    raise
+
+    def _stream_groq(
+        self,
+        messages : list[dict],
+        slog     : ServiceLogger,
+    ) -> Iterator[str]:
+        """Groq's API is OpenAI-compatible; error/retry shape mirrors
+        HuggingFace's handling below since both are standard
+        OpenAI-SDK-style 429/5xx semantics."""
+        for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
+            try:
+                resp = self.groq_client.chat.completions.create(
+                    model      = GROQ_MODEL,
+                    messages   = messages,
+                    max_tokens = MAX_TOKENS,
+                    temperature= max(float(TEMPERATURE), 0.01),
+                    stream     = True,
+                )
+                count = 0
+                for chunk in resp:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        count += 1
+                        yield delta.content
+                slog.info("Groq stream done — %d tokens", count)
+                return
+
+            except Exception as e:
+                status = _http_status(e)
+                if status == 429:
+                    slog.warning(
+                        "Groq 429 — waiting 10s (attempt %d/%d)",
+                        attempt, RETRY_MAX_ATTEMPTS,
+                    )
+                    time.sleep(10)
+                    if attempt >= RETRY_MAX_ATTEMPTS:
+                        raise
+                elif status and 400 <= status < 500:
+                    slog.error("Groq HTTP %s: %s", status, _error_body(e))
+                    raise
+                elif attempt < RETRY_MAX_ATTEMPTS:
+                    delay = 2 ** (attempt - 1)
+                    slog.warning(
+                        "Groq transient error attempt %d/%d: %s — retry in %ds",
                         attempt, RETRY_MAX_ATTEMPTS, e, delay,
                     )
                     time.sleep(delay)
@@ -349,18 +499,27 @@ class AIRouter:
         question : str,
         doc_id   : str,
         slog     : ServiceLogger,
+        model    : str,
     ) -> ChatResponse:
         start    = time.monotonic()
         answer   = ""
         provider = LLMProvider.OPENROUTER
-        model_u  = self._or_model
+        model_u  = model
 
         if OPENROUTER_API_KEY:
             try:
-                answer   = self._complete_openrouter(messages, slog)
+                answer   = self._complete_openrouter(messages, slog, model)
                 provider = LLMProvider.OPENROUTER
             except Exception as e:
                 _log_error("OpenRouter", e, slog)
+
+        if not answer and GROQ_API_KEY:
+            try:
+                answer   = self._complete_groq(messages, slog)
+                provider = LLMProvider.GROQ
+                model_u  = GROQ_MODEL
+            except Exception as e:
+                _log_error("Groq", e, slog)
 
         if not answer and HUGGINGFACE_API_KEY:
             try:
@@ -370,7 +529,7 @@ class AIRouter:
             except Exception as e:
                 _log_error("HuggingFace", e, slog)
                 answer   = (
-                    "⚠️ Both LLM providers failed. "
+                    "⚠️ All LLM providers failed. "
                     "Check your API keys and model availability."
                 )
 
@@ -384,10 +543,10 @@ class AIRouter:
         )
 
     def _complete_openrouter(
-        self, messages: list[dict], slog: ServiceLogger
+        self, messages: list[dict], slog: ServiceLogger, model: str
     ) -> str:
         resp   = self.or_client.chat.completions.create(
-            model      = self._or_model,
+            model      = model,
             messages   = messages,
             max_tokens = MAX_TOKENS,
             temperature= max(float(TEMPERATURE), 0.01),
@@ -395,6 +554,20 @@ class AIRouter:
         )
         answer = resp.choices[0].message.content or ""
         slog.info("OpenRouter complete ✓ — %d chars", len(answer))
+        return answer
+
+    def _complete_groq(
+        self, messages: list[dict], slog: ServiceLogger
+    ) -> str:
+        resp   = self.groq_client.chat.completions.create(
+            model      = GROQ_MODEL,
+            messages   = messages,
+            max_tokens = MAX_TOKENS,
+            temperature= max(float(TEMPERATURE), 0.01),
+            stream     = False,
+        )
+        answer = resp.choices[0].message.content or ""
+        slog.info("Groq complete ✓ — %d chars", len(answer))
         return answer
 
     def _complete_huggingface(
