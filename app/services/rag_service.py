@@ -296,11 +296,32 @@ class RAGService:
         scores, indices = index.search(query_vec, actual_k)
 
         results: list[SearchResult] = []
+        seen_ids: set[str] = set()
         for rank, (score, idx) in enumerate(zip(scores[0], indices[0]), start=1):
             idx_int = int(idx)
             if idx_int == -1 or float(score) < threshold:
                 continue
-            results.append(SearchResult(chunk=chunks[idx_int], score=round(float(score), 4), rank=rank))
+            chunk = chunks[idx_int]
+            seen_ids.add(chunk.chunk_id)
+            results.append(SearchResult(chunk=chunk, score=round(float(score), 4), rank=rank))
+
+        # Same hybrid fusion as get_library_context/get_context - catches
+        # exact keyword/terminology matches (specific formulas, acronyms,
+        # named terms) that a single vector query can under-weight. Only
+        # cached under "library" when this is the real, unfiltered library
+        # index - a filtered call builds an ad-hoc chunk subset each time
+        # (see _resolve_library_index), so caching BM25 under that shared
+        # key would serve a stale corpus to the next unfiltered search.
+        has_filters = bool(doc_ids or author or year or section_type or page_number is not None)
+        self._add_bm25_candidates(
+            bm25_cache_key=None if has_filters else "library",
+            index=index, chunks=chunks, query=query,
+            top_k=top_k, threshold=threshold, seen_ids=seen_ids,
+            all_results=results, slog=slog,
+        )
+        results.sort(key=lambda r: r.score, reverse=True)
+        for i, r in enumerate(results):
+            r.rank = i + 1
 
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
         slog.info(
