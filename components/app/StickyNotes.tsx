@@ -110,9 +110,11 @@ export function StickyNotes({
       ) : (
         <button
           onClick={() => setComposing(true)}
-          className="flex items-center gap-1.5 text-xs text-paper-faint transition-colors hover:text-achievement focus-ring"
+          aria-label="Add a note about this section"
+          title="Add a note about this section"
+          className="flex h-6 w-6 items-center justify-center rounded-full text-paper-faint/70 transition-colors hover:bg-gold/10 hover:text-gold-deep focus-ring"
         >
-          <Plus size={12} /> Add sticky note
+          <Plus size={12} />
         </button>
       )}
     </div>
