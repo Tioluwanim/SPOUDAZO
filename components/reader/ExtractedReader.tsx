@@ -74,18 +74,32 @@ export function ExtractedReader({
         // no divider - just the next stretch of the same running text.
         const hasTitle = section.title.trim().length > 0;
 
+        // Only titled (real-boundary) sections get the scroll-reveal
+        // wrapper, which costs one IntersectionObserver each. LazySection
+        // below already runs its own observer per section for lazy-mount -
+        // giving every section a second observer for a purely decorative
+        // reveal is real overhead on a document chunked into many small
+        // pieces, and untitled continuations don't visually read as a "new
+        // block" anyway, so there's nothing lost by skipping it there.
+        const Wrapper = hasTitle ? motion.section : "section";
+        const wrapperMotionProps = hasTitle
+          ? {
+              initial: { opacity: 0, y: 10 },
+              whileInView: { opacity: 1, y: 0 },
+              viewport: { once: true, margin: "-60px" },
+              transition: { duration: 0.4 },
+            }
+          : {};
+
         return (
-          <motion.section
+          <Wrapper
             key={i}
             data-section-index={i}
             ref={(el: HTMLElement | null) => {
               sectionRefs.current[i] = el;
             }}
             aria-current={isMatch ? "true" : undefined}
-            initial={{ opacity: 0, y: 10 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.4 }}
+            {...wrapperMotionProps}
             className={`scroll-mt-6 rounded-2xl transition-colors ${hasTitle ? "mt-16" : "mt-0"} ${
               isMatch ? "bg-gold/5 ring-1 ring-gold/30" : ""
             }`}
@@ -126,7 +140,7 @@ export function ExtractedReader({
                 onChanged={onStickyNotesChanged}
               />
             </LazySection>
-          </motion.section>
+          </Wrapper>
         );
       })}
     </article>
