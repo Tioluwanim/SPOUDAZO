@@ -39,10 +39,13 @@ export function useCourseChat(
   const [sending, setSending] = useState(false);
   const { push } = useToast();
 
-  async function send() {
-    const message = input.trim();
+  async function send(overrideMessage?: string) {
+    const message = (overrideMessage ?? input).trim();
     if (!message || sending) return;
 
+    // When regenerating, `messages` passed in already has the trailing
+    // assistant turn stripped by the caller - this always appends a fresh
+    // user bubble, so regenerate must NOT call this directly (see below).
     const nextMessages: DisplayMessage[] = [...messages, { role: "user", content: message }];
     setMessages(nextMessages);
     setInput("");
@@ -93,6 +96,78 @@ export function useCourseChat(
     }
   }
 
+  /** Re-asks the last user turn against the same history that produced it,
+   * replacing the existing assistant reply rather than appending a new
+   * exchange. Built on the same streamCourseChat call `send` uses - no new
+   * backend endpoint, just a different history slice. */
+  async function regenerate() {
+    if (sending) return;
+    const lastUserIdx = [...messages].reverse().findIndex((m) => m.role === "user");
+    if (lastUserIdx === -1) return;
+    const idx = messages.length - 1 - lastUserIdx;
+    const lastUserMessage = messages[idx].content;
+    const priorHistory = messages.slice(0, idx);
+
+    setMessages(priorHistory);
+    setSending(true);
+    let streamedIndex = -1;
+    setMessages((prev) => {
+      const withUser = [...prev, { role: "user" as const, content: lastUserMessage }];
+      streamedIndex = withUser.length;
+      return [...withUser, { role: "assistant" as const, content: "" }];
+    });
+
+    try {
+      const history: ChatTurn[] = priorHistory.map(({ role, content }) => ({ role, content }));
+      let accumulated = "";
+      await streamCourseChat(
+        courseId,
+        lastUserMessage,
+        history,
+        {
+          onMeta: (meta) => {
+            setMessages((prev) =>
+              prev.map((m, i) => (i === streamedIndex ? { ...m, grounding: meta.grounding, sources: meta.sources } : m))
+            );
+          },
+          onToken: (text) => {
+            accumulated += text;
+            setMessages((prev) =>
+              prev.map((m, i) => (i === streamedIndex ? { ...m, content: accumulated } : m))
+            );
+          },
+          onError: (errMessage) => {
+            throw new Error(errMessage);
+          },
+        },
+        currentDocId,
+        currentSectionIndex
+      );
+    } catch (err) {
+      push(err instanceof Error ? err.message : "Couldn't reach the study assistant", "error");
+      setMessages(messages);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  /** Builds a plain-markdown transcript and triggers a browser download -
+   * entirely client-side, no export endpoint needed. */
+  function exportMarkdown(courseLabel = "Spoudazo") {
+    const lines = [`# ${courseLabel} — chat transcript`, ""];
+    for (const m of messages) {
+      if (!m.content) continue;
+      lines.push(m.role === "user" ? "**You:**" : "**Tutor:**", "", m.content, "");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${courseLabel.toLowerCase().replace(/\s+/g, "-")}-chat.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   /** Pushes a message pair straight into the feed without calling the chat
    * API - used by the reader's highlight-to-ask toolbar, whose actions
    * (explain, summarize, ...) hit their own endpoint and just need the
@@ -106,7 +181,7 @@ export function useCourseChat(
     ]);
   }
 
-  return { messages, input, setInput, sending, send, addAssistantMessage };
+  return { messages, input, setInput, sending, send, addAssistantMessage, regenerate, exportMarkdown };
 }
 
 export type CourseChatState = ReturnType<typeof useCourseChat>;
