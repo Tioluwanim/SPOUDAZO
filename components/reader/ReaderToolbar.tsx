@@ -78,7 +78,7 @@ export function ReaderToolbar({
           aria-selected={mode === "ai"}
           onClick={() => onModeChange("ai")}
           className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-ring ${
-            mode === "ai" ? "bg-ai-accent text-white" : "text-paper-dim hover:text-paper"
+            mode === "ai" ? "bg-gold text-[#2B2B2B]" : "text-paper-dim hover:text-paper"
           }`}
         >
           <BookOpen size={13} /> AI Reading
@@ -88,7 +88,7 @@ export function ReaderToolbar({
           aria-selected={mode === "pdf"}
           onClick={() => onModeChange("pdf")}
           className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-ring ${
-            mode === "pdf" ? "bg-ai-accent text-white" : "text-paper-dim hover:text-paper"
+            mode === "pdf" ? "bg-gold text-[#2B2B2B]" : "text-paper-dim hover:text-paper"
           }`}
         >
           <FileStack size={13} /> Original PDF
