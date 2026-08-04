@@ -14,9 +14,9 @@ const base =
 
 const variants = {
   primary:
-    "bg-navy text-white hover:bg-navy/90 hover:shadow-glow active:scale-[0.98]",
+    "relative overflow-hidden bg-gold text-[#2B2B2B] shadow-gold hover:bg-gold-deep hover:shadow-gold-lg active:scale-[0.98] before:absolute before:inset-0 before:-translate-x-full before:bg-gradient-to-r before:from-transparent before:via-white/40 before:to-transparent hover:before:translate-x-full before:transition-transform before:duration-700",
   outline:
-    "border border-ink-border text-paper hover:border-navy/40 hover:bg-ink-surface",
+    "border border-gold/50 bg-ink-soft text-paper hover:border-gold hover:bg-gold/5",
   ghost: "text-paper-dim hover:text-paper hover:bg-ink-surface",
   danger: "bg-danger/90 text-white hover:bg-danger",
 };
