@@ -5,31 +5,33 @@
 :root {
   color-scheme: light;
 
-  --color-ink: 248 249 250;         /* #F8F9FA - page background */
+  --color-ink: 252 251 247;         /* #FCFBF7 - page background (warm cream) */
   --color-ink-soft: 255 255 255;    /* #FFFFFF - modal/panel background */
   --color-ink-surface: 255 255 255; /* #FFFFFF - card background */
-  --color-ink-border: 216 222 232;  /* #D8DEE8 - borders, dividers */
+  --color-ink-border: 232 223 200;  /* #E8DFC8 - borders, dividers */
 
-  --color-paper: 10 25 47;          /* #0A192F - headings, primary text */
-  --color-paper-dim: 74 90 114;     /* #4A5A72 - secondary text */
-  --color-paper-faint: 139 150 168; /* #8B96A8 - labels, meta text */
+  --color-paper: 43 43 43;          /* #2B2B2B - headings, primary text */
+  --color-paper-dim: 107 114 128;   /* #6B7280 - secondary text */
+  --color-paper-faint: 154 143 118; /* warm taupe - labels, meta text */
 
-  --grain-rgb: 10, 25, 47;          /* dark specks on the light background */
+  --grain-rgb: 43, 43, 43;          /* dark specks on the light background */
 }
 
 .dark {
   color-scheme: dark;
 
-  --color-ink: 12 16 22;            /* near-black page background */
-  --color-ink-soft: 18 23 31;
-  --color-ink-surface: 22 27 36;
-  --color-ink-border: 42 50 63;
+  /* A reading-room-at-night variant: warm espresso, not cool near-black,
+     so gold still reads as gold rather than turning neon against blue-black. */
+  --color-ink: 22 19 15;
+  --color-ink-soft: 29 25 20;
+  --color-ink-surface: 34 29 23;
+  --color-ink-border: 61 52 39;
 
-  --color-paper: 240 242 245;       /* near-white primary text */
-  --color-paper-dim: 168 178 191;
-  --color-paper-faint: 106 118 134;
+  --color-paper: 240 235 224;       /* warm off-white primary text */
+  --color-paper-dim: 190 179 158;
+  --color-paper-faint: 138 127 106;
 
-  --grain-rgb: 240, 242, 245;       /* light specks on the dark background */
+  --grain-rgb: 240, 235, 224;       /* light specks on the dark background */
 }
 
 * {
@@ -64,11 +66,11 @@ body {
   outline: none;
 }
 .focus-ring:focus-visible {
-  outline: 2px solid #00B4D8;
+  outline: 2px solid #B8860B;
   outline-offset: 3px;
 }
 
 ::selection {
-  background: #FFD700;
-  color: #0A192F;
+  background: #C8A54B;
+  color: #2B2B2B;
 }
