@@ -37,7 +37,7 @@ export function ProfileMenu() {
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label="Account menu"
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-ai-accent font-medium text-white transition-transform hover:scale-105 focus-ring"
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-gold font-medium text-[#2B2B2B] transition-transform hover:scale-105 focus-ring"
         >
           {initial}
         </button>
