@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, BookOpen } from "lucide-react";
 import { AppShell } from "@/components/app/AppShell";
 import { CourseCard } from "@/components/app/CourseCard";
+import { DashboardOverview } from "@/components/app/DashboardOverview";
 import { CreateCourseModal } from "@/components/app/CreateCourseModal";
 import { EmptyState } from "@/components/app/EmptyState";
 import { Walkthrough, hasSeenWalkthrough } from "@/components/app/Walkthrough";
@@ -14,8 +15,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useToast } from "@/components/ui/Toast";
 import { getProfile } from "@/lib/session";
 import { useRequireAuth } from "@/lib/auth";
-import { listCourses } from "@/lib/api";
-import type { Course } from "@/lib/types";
+import { listCourses, getReadingAnalytics, listRecentDocuments } from "@/lib/api";
+import type { Course, ReadingStats, RecentDocument } from "@/lib/types";
 
 export default function DashboardPage() {
   return (
@@ -34,6 +35,8 @@ function DashboardPageInner() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [showWalkthrough, setShowWalkthrough] = useState(false);
+  const [stats, setStats] = useState<ReadingStats | null>(null);
+  const [recent, setRecent] = useState<RecentDocument[]>([]);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -46,6 +49,12 @@ function DashboardPageInner() {
       .then(setCourses)
       .catch((err) => push(err instanceof Error ? err.message : "Couldn't load courses", "error"))
       .finally(() => setLoading(false));
+
+    // Overview strip data - fetched independently of the course list and
+    // failing silently, since it's supplementary (a student with no
+    // reading history yet shouldn't see an error toast for it).
+    getReadingAnalytics().then(setStats).catch(() => {});
+    listRecentDocuments(1).then(setRecent).catch(() => {});
   }, [authLoading, user, push, searchParams]);
 
   function closeWalkthrough() {
@@ -61,7 +70,7 @@ function DashboardPageInner() {
     <AppShell>
       <div className="mb-10 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <span className="font-mono text-xs uppercase tracking-widest text-ai-accent">
+          <span className="font-mono text-xs uppercase tracking-widest text-gold-deep">
             Dashboard
           </span>
           <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">
@@ -72,6 +81,8 @@ function DashboardPageInner() {
           <Plus size={16} /> Add course
         </Button>
       </div>
+
+      {!loading && <DashboardOverview stats={stats} recent={recent} />}
 
       {loading ? (
         <Spinner label="Loading your courses…" />
