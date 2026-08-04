@@ -4,6 +4,9 @@ import { ImpactStatement } from "@/components/landing/ImpactStatement";
 import { HowItWorks } from "@/components/landing/HowItWorks";
 import { Agents } from "@/components/landing/Agents";
 import { RegisterShowcase } from "@/components/landing/RegisterShowcase";
+import { DashboardPreview } from "@/components/landing/DashboardPreview";
+import { Testimonials } from "@/components/landing/Testimonials";
+import { FAQ } from "@/components/landing/FAQ";
 import { ClosingCTA, LandingFooter } from "@/components/landing/ClosingCTA";
 
 export default function LandingPage() {
@@ -15,6 +18,9 @@ export default function LandingPage() {
       <HowItWorks />
       <Agents />
       <RegisterShowcase />
+      <DashboardPreview />
+      <Testimonials />
+      <FAQ />
       <ClosingCTA />
       <LandingFooter />
     </main>
