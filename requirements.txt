@@ -13,6 +13,7 @@ boto3>=1.34.0
 
 PyMuPDF>=1.26.0,<2.0.0
 pytesseract>=0.3.13
+tesseract
 pdf2image>=1.17.0
 Pillow>=11.0.0,<12.0.0
 
