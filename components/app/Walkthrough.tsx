@@ -10,11 +10,6 @@ const STORAGE_KEY = "spoudazo:walkthrough_seen";
 const MAX_CARD_WIDTH = 340;
 const GAP = 16;
 const SPOTLIGHT_PADDING = 8;
-// Below this viewport width there usually isn't room beside a target for
-// a 340px card, so side placements ("left"/"right") collapse to "bottom"
-// (or "top" if that doesn't fit either) rather than pushing the card
-// partly off-screen.
-const MOBILE_BREAKPOINT = 640;
 
 export function hasSeenWalkthrough(): boolean {
   if (typeof window === "undefined") return true;
@@ -74,6 +69,49 @@ function useTargetRect(targetId: string | undefined) {
   return rect;
 }
 
+type Placement = "top" | "bottom" | "left" | "right";
+
+/** Picks the side the card actually fits on, rather than trusting the
+ * step's configured placement blindly. This matters beyond just narrow
+ * viewports: e.g. the mobile bottom nav sits flush against the bottom
+ * edge of the screen, so a step configured as "bottom" for that target
+ * has zero room below it regardless of how wide the viewport is - the
+ * fix has to be "does this direction actually have room", not "is the
+ * viewport narrow". */
+function pickPlacement(
+  rect: DOMRect,
+  preferred: Placement | undefined,
+  cardWidth: number,
+  cardHeight: number,
+  vw: number,
+  vh: number
+): Placement {
+  const room: Record<Placement, number> = {
+    top: rect.top - GAP,
+    bottom: vh - rect.bottom - GAP,
+    left: rect.left - GAP,
+    right: vw - rect.right - GAP,
+  };
+  const needed: Record<Placement, number> = {
+    top: cardHeight,
+    bottom: cardHeight,
+    left: cardWidth,
+    right: cardWidth,
+  };
+  const fits = (p: Placement) => room[p] >= needed[p];
+
+  if (preferred && fits(preferred)) return preferred;
+
+  const order: Placement[] = ["bottom", "top", "right", "left"];
+  const candidate = order.find(fits);
+  if (candidate) return candidate;
+
+  // Nothing truly fits (a very small viewport) - use whichever direction
+  // has the most room. The clamping in cardStyle still keeps the card
+  // fully on-screen either way, just tighter against the target.
+  return order.reduce((best, p) => (room[p] > room[best] ? p : best), order[0]);
+}
+
 function cardStyle(
   rect: DOMRect | null,
   placement: WalkthroughStep["placement"],
@@ -83,37 +121,26 @@ function cardStyle(
   if (typeof window === "undefined") return {};
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const isMobile = vw < MOBILE_BREAKPOINT;
 
   if (!rect) {
     // Centered step (welcome / finish) - no target to anchor to.
     return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
   }
 
-  // A card this wide has no real room to sit beside a target on a phone-
-  // width viewport, so treat any "left"/"right" step as "bottom" there
-  // (or "top" if there's more room above than below) instead of letting
-  // the fixed side-offset math push part of the card off-screen.
-  const effectivePlacement: WalkthroughStep["placement"] =
-    isMobile && (placement === "left" || placement === "right")
-      ? rect.bottom + GAP + cardHeight <= vh
-        ? "bottom"
-        : "top"
-      : placement;
-
+  const effectivePlacement = pickPlacement(rect, placement, cardWidth, cardHeight, vw, vh);
   const clampLeft = Math.max(GAP, Math.min(rect.left, vw - cardWidth - GAP));
   const clampTop = Math.max(GAP, Math.min(rect.top, vh - cardHeight - GAP));
 
   switch (effectivePlacement) {
     case "top":
-      return { left: clampLeft, bottom: vh - rect.top + GAP };
+      return { left: clampLeft, bottom: Math.max(GAP, vh - rect.top + GAP) };
     case "left":
       return { right: Math.max(GAP, vw - rect.left + GAP), top: clampTop };
     case "right":
       return { left: Math.min(rect.right + GAP, vw - cardWidth - GAP), top: clampTop };
     case "bottom":
     default:
-      return { left: clampLeft, top: rect.bottom + GAP };
+      return { left: clampLeft, top: Math.min(rect.bottom + GAP, vh - cardHeight - GAP) };
   }
 }
 
