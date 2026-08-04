@@ -1,5 +1,7 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { Search } from "lucide-react";
 import { LazySection } from "@/components/app/LazySection";
 import { StickyNotes } from "@/components/app/StickyNotes";
 import type { Annotation, DocumentSection } from "@/lib/types";
@@ -28,7 +30,7 @@ function renderWithHighlights(content: string, quotes: string[]): React.ReactNod
     if (r.start < cursor) return;
     if (r.start > cursor) nodes.push(content.slice(cursor, r.start));
     nodes.push(
-      <mark key={i} className="rounded bg-achievement/25 text-paper">
+      <mark key={i} className="rounded bg-gold/30 px-0.5 text-paper">
         {content.slice(r.start, r.end)}
       </mark>
     );
@@ -60,22 +62,35 @@ export function ExtractedReader({
   onStickyNotesChanged: () => void;
 }) {
   return (
-    <article style={{ fontSize: `${zoom}%` }} className="mx-auto max-w-[42rem] space-y-14 px-6 py-10">
+    <article style={{ fontSize: `${zoom}%` }} className="mx-auto max-w-[42rem] space-y-16 px-6 py-10">
       {sections.map((section, i) => {
         const isMatch = matchingSectionIndexes.has(i);
         return (
-          <section
+          <motion.section
             key={i}
             data-section-index={i}
-            ref={(el) => {
+            ref={(el: HTMLElement | null) => {
               sectionRefs.current[i] = el;
             }}
             aria-current={isMatch ? "true" : undefined}
-            className={`scroll-mt-6 rounded-xl transition-colors ${
-              isMatch ? "bg-ai-accent/5 ring-1 ring-ai-accent/30" : ""
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-60px" }}
+            transition={{ duration: 0.4 }}
+            className={`scroll-mt-6 rounded-2xl transition-colors ${
+              isMatch ? "bg-gold/5 ring-1 ring-gold/30" : ""
             }`}
           >
-            <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-ink-border/60 pb-2">
+            <div className="mb-1 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-paper-faint">
+              <span className="h-px w-5 bg-gold/50" />
+              Section {i + 1} of {sections.length}
+              {isMatch && (
+                <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-gold-deep normal-case tracking-normal">
+                  <Search size={10} /> Match
+                </span>
+              )}
+            </div>
+            <div className="mb-4 flex items-baseline justify-between gap-3 border-b border-ink-border/60 pb-3">
               <h2 className="font-display text-2xl leading-snug text-paper">{section.title}</h2>
               {(section.page_start || section.page_end) > 0 && (
                 <span className="shrink-0 font-mono text-[11px] text-paper-faint">
@@ -86,7 +101,7 @@ export function ExtractedReader({
               )}
             </div>
             <LazySection placeholderHeight={Math.min(400, section.content.length / 3)}>
-              <p className="whitespace-pre-line text-[1.05rem] leading-[1.85] text-paper-dim">
+              <p className="whitespace-pre-line text-[1.05rem] leading-[1.85] text-paper/90">
                 {renderWithHighlights(section.content, highlightsBySection.get(i) || [])}
               </p>
               <StickyNotes
@@ -98,7 +113,7 @@ export function ExtractedReader({
                 onChanged={onStickyNotesChanged}
               />
             </LazySection>
-          </section>
+          </motion.section>
         );
       })}
     </article>
