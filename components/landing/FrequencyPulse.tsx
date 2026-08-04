@@ -16,7 +16,7 @@ export function FrequencyPulse({ className = "" }: { className?: string }) {
       {HEIGHTS.map((h, i) => (
         <span
           key={i}
-          className="w-2 origin-bottom rounded-full bg-gradient-to-t from-amber-deep to-amber-glow animate-pulseBar"
+          className="w-2 origin-bottom rounded-full bg-gradient-to-t from-gold-deep to-gold animate-pulseBar"
           style={{
             height: `${h}px`,
             animationDelay: `${(i % 7) * 0.15}s`,
