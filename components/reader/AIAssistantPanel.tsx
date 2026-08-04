@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PanelRightClose, PanelRightOpen, Send, Sparkles } from "lucide-react";
+import { PanelRightClose, PanelRightOpen, Send, Sparkles, Download } from "lucide-react";
 import { ChatMessageList } from "@/components/app/ChatMessages";
+import { QuickSuggestions } from "@/components/app/QuickSuggestions";
 import type { CourseChatState } from "@/lib/useCourseChat";
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 560;
 const DEFAULT_WIDTH = 360;
+
+const SUGGESTIONS = [
+  "Explain this page",
+  "Summarize the key points",
+  "Quiz me on this section",
+];
 
 /**
  * Docked AI panel for the reader. Takes `chat` as a prop (rather than
@@ -19,13 +26,21 @@ const DEFAULT_WIDTH = 360;
 export function AIAssistantPanel({ chat }: { chat: CourseChatState }) {
   const [collapsed, setCollapsed] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const { messages, input, setInput, sending, send } = chat;
+  const { messages, input, setInput, sending, send, regenerate, exportMarkdown } = chat;
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input]);
 
   useEffect(() => {
     function onPointerMove(e: PointerEvent) {
@@ -81,28 +96,42 @@ export function AIAssistantPanel({ chat }: { chat: CourseChatState }) {
 
       <div className="flex items-center justify-between border-b border-ink-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ai-accent/15 text-ai-accent">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gold/15 text-gold-deep">
             <Sparkles size={14} />
           </span>
           <p className="font-display text-sm text-paper">Study assistant</p>
         </div>
-        <button
-          onClick={() => setCollapsed(true)}
-          aria-label="Collapse AI panel"
-          className="rounded-lg p-1.5 text-paper-dim hover:bg-ink-border hover:text-paper focus-ring"
-        >
-          <PanelRightClose size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          {messages.length > 0 && (
+            <button
+              onClick={() => exportMarkdown("Study session")}
+              aria-label="Export conversation"
+              title="Export as Markdown"
+              className="rounded-lg p-1.5 text-paper-dim hover:bg-ink-border hover:text-paper focus-ring"
+            >
+              <Download size={15} />
+            </button>
+          )}
+          <button
+            onClick={() => setCollapsed(true)}
+            aria-label="Collapse AI panel"
+            className="rounded-lg p-1.5 text-paper-dim hover:bg-ink-border hover:text-paper focus-ring"
+          >
+            <PanelRightClose size={16} />
+          </button>
+        </div>
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <ChatMessageList
           messages={messages}
           sending={sending}
+          onRegenerate={regenerate}
           emptyState={
             <div className="flex h-full flex-col items-center justify-center text-center text-paper-faint">
-              <Sparkles size={26} className="mb-2 text-ai-accent/60" />
+              <Sparkles size={26} className="mb-2 text-gold-deep/70" />
               <p className="text-sm">Ask about anything on this page, or your course material in general.</p>
+              <QuickSuggestions suggestions={SUGGESTIONS} onPick={(s) => send(s)} />
             </div>
           }
         />
@@ -111,6 +140,7 @@ export function AIAssistantPanel({ chat }: { chat: CourseChatState }) {
       <div className="border-t border-ink-border p-3">
         <div className="flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -119,10 +149,10 @@ export function AIAssistantPanel({ chat }: { chat: CourseChatState }) {
             className="flex-1 resize-none rounded-xl border border-ink-border bg-ink px-3 py-2.5 text-sm text-paper placeholder:text-paper-faint focus-ring"
           />
           <button
-            onClick={send}
+            onClick={() => send()}
             disabled={sending || !input.trim()}
             aria-label="Send"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-ai-accent text-white transition-opacity hover:bg-ai-accent-deep disabled:opacity-40 focus-ring"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold text-[#2B2B2B] transition-all hover:bg-gold-deep disabled:opacity-40 focus-ring"
           >
             <Send size={16} />
           </button>
