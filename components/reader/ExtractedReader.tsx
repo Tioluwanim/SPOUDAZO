@@ -62,9 +62,18 @@ export function ExtractedReader({
   onStickyNotesChanged: () => void;
 }) {
   return (
-    <article style={{ fontSize: `${zoom}%` }} className="mx-auto max-w-[42rem] space-y-16 px-6 py-10">
+    <article style={{ fontSize: `${zoom}%` }} className="mx-auto max-w-[42rem] px-6 py-10">
       {sections.map((section, i) => {
         const isMatch = matchingSectionIndexes.has(i);
+        // Extraction sometimes chunks a document far finer than its real
+        // headings (e.g. roughly per PDF page rather than per section) -
+        // when a chunk has no real title, giving it a full header (eyebrow,
+        // <h2>, page badge) makes it look like a new topic started, when
+        // really it's a continuation of the previous chunk's paragraph.
+        // Those render as a plain continuation instead: no header, no gap,
+        // no divider - just the next stretch of the same running text.
+        const hasTitle = section.title.trim().length > 0;
+
         return (
           <motion.section
             key={i}
@@ -77,29 +86,33 @@ export function ExtractedReader({
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-60px" }}
             transition={{ duration: 0.4 }}
-            className={`scroll-mt-6 rounded-2xl transition-colors ${
+            className={`scroll-mt-6 rounded-2xl transition-colors ${hasTitle ? "mt-16" : "mt-0"} ${
               isMatch ? "bg-gold/5 ring-1 ring-gold/30" : ""
             }`}
           >
-            <div className="mb-1 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-paper-faint">
-              <span className="h-px w-5 bg-gold/50" />
-              Section {i + 1} of {sections.length}
-              {isMatch && (
-                <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-gold-deep normal-case tracking-normal">
-                  <Search size={10} /> Match
-                </span>
-              )}
-            </div>
-            <div className="mb-4 flex items-baseline justify-between gap-3 border-b border-ink-border/60 pb-3">
-              <h2 className="font-display text-2xl leading-snug text-paper">{section.title}</h2>
-              {(section.page_start || section.page_end) > 0 && (
-                <span className="shrink-0 font-mono text-[11px] text-paper-faint">
-                  {section.page_start === section.page_end
-                    ? `p.${section.page_start}`
-                    : `p.${section.page_start}–${section.page_end}`}
-                </span>
-              )}
-            </div>
+            {hasTitle && (
+              <>
+                <div className="mb-1 flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-paper-faint">
+                  <span className="h-px w-5 bg-gold/50" />
+                  Section {i + 1} of {sections.length}
+                  {isMatch && (
+                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-gold-deep normal-case tracking-normal">
+                      <Search size={10} /> Match
+                    </span>
+                  )}
+                </div>
+                <div className="mb-4 flex items-baseline justify-between gap-3 border-b border-ink-border/60 pb-3">
+                  <h2 className="font-display text-2xl leading-snug text-paper">{section.title}</h2>
+                  {(section.page_start || section.page_end) > 0 && (
+                    <span className="shrink-0 font-mono text-[11px] text-paper-faint">
+                      {section.page_start === section.page_end
+                        ? `p.${section.page_start}`
+                        : `p.${section.page_start}–${section.page_end}`}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
             <LazySection placeholderHeight={Math.min(400, section.content.length / 3)}>
               <p className="whitespace-pre-line text-[1.05rem] leading-[1.85] text-paper/90">
                 {renderWithHighlights(section.content, highlightsBySection.get(i) || [])}
