@@ -237,7 +237,7 @@ export function HighlightToolbar({
           />
           <button
             onClick={handleSaveBookmark}
-            className="rounded-lg bg-ai-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-ai-accent-deep focus-ring"
+            className="rounded-lg bg-gold px-2.5 py-1 text-xs font-medium text-[#2B2B2B] hover:bg-gold-deep focus-ring"
           >
             Save
           </button>
