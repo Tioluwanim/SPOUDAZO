@@ -32,7 +32,7 @@ const AGENTS = [
 
 export function Agents() {
   return (
-    <section id="agents" className="relative border-t border-ink-border px-6 py-28">
+    <section id="features" className="relative border-t border-ink-border px-6 py-28">
       <div className="mx-auto max-w-6xl">
         <motion.div
           initial={{ opacity: 0, y: 16 }}
@@ -41,7 +41,7 @@ export function Agents() {
           transition={{ duration: 0.6 }}
           className="mb-16 max-w-xl"
         >
-          <span className="font-mono text-xs uppercase tracking-widest text-success">
+          <span className="font-mono text-xs uppercase tracking-widest text-gold-deep">
             Under the hood
           </span>
           <h2 className="mt-3 font-display text-3xl text-paper sm:text-4xl">
@@ -62,11 +62,15 @@ export function Agents() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-60px" }}
               transition={{ duration: 0.5, delay: i * 0.08 }}
-              className="group rounded-2xl border border-ink-border bg-ink-surface/60 p-7 transition-colors hover:border-ai-accent/40"
+              whileHover={{ y: -4 }}
+              className="group relative overflow-hidden rounded-2xl border border-ink-border bg-ink-surface/60 p-7 shadow-sm transition-all hover:border-gold/40 hover:shadow-gold"
             >
-              <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ai-accent/10 text-ai-accent">
-                  <agent.icon size={19} />
+              {/* Soft gold glow that only appears on hover - premium, not loud */}
+              <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gold/0 blur-3xl transition-colors duration-500 group-hover:bg-gold/15" />
+
+              <div className="relative mb-5 flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold/10 text-gold-deep transition-transform duration-300 group-hover:scale-110">
+                  <agent.icon size={20} />
                 </div>
                 <div>
                   <h3 className="font-display text-lg text-paper">{agent.name}</h3>
@@ -75,7 +79,7 @@ export function Agents() {
                   </p>
                 </div>
               </div>
-              <p className="text-sm leading-relaxed text-paper-dim">{agent.body}</p>
+              <p className="relative text-sm leading-relaxed text-paper-dim">{agent.body}</p>
             </motion.div>
           ))}
         </div>
