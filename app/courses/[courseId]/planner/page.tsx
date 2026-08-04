@@ -134,7 +134,7 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
         sidebar={<CourseSidebar course={course} courseId={courseId} topics={topics} />}
       >
         <div className="mb-8">
-          <span className="font-mono text-xs uppercase tracking-widest text-amber-glow">
+          <span className="font-mono text-xs uppercase tracking-widest text-gold-deep">
             Study planner
           </span>
           <h1 className="mt-2 font-display text-2xl text-paper sm:text-3xl">
@@ -204,7 +204,7 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
               </span>
               <button
                 onClick={() => setPlan(null)}
-                className="text-xs text-amber-glow hover:underline focus-ring"
+                className="text-xs text-gold-deep hover:underline focus-ring"
               >
                 Rebuild plan
               </button>
@@ -259,12 +259,12 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
                         </button>
                         <div className="flex items-center gap-2 pl-8 sm:pl-0">
                           <Link href={`/courses/${courseId}/topics/${item.topic_id}?tab=theory`}>
-                            <button className="flex items-center gap-1 rounded-full border border-ink-border px-2.5 py-1 text-xs text-paper-dim transition-colors hover:border-amber-glow/50 hover:text-paper focus-ring">
+                            <button className="flex items-center gap-1 rounded-full border border-ink-border px-2.5 py-1 text-xs text-paper-dim transition-colors hover:border-gold-deep/50 hover:text-paper focus-ring">
                               <BookOpen size={12} /> Theory
                             </button>
                           </Link>
                           <Link href={`/courses/${courseId}/topics/${item.topic_id}?tab=cbt`}>
-                            <button className="flex items-center gap-1 rounded-full border border-ink-border px-2.5 py-1 text-xs text-paper-dim transition-colors hover:border-amber-glow/50 hover:text-paper focus-ring">
+                            <button className="flex items-center gap-1 rounded-full border border-ink-border px-2.5 py-1 text-xs text-paper-dim transition-colors hover:border-gold-deep/50 hover:text-paper focus-ring">
                               <ListChecks size={12} /> CBT
                             </button>
                           </Link>
