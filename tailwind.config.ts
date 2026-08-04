@@ -23,38 +23,50 @@ const config: Config = {
           dim: "rgb(var(--color-paper-dim) / <alpha-value>)",
           faint: "rgb(var(--color-paper-faint) / <alpha-value>)",
         },
-        // Primary - Deep Navy. Headers, primary buttons, nav, logo.
+        // --- Luxury academic gold system (replaces the old navy/electric-blue
+        // brand) ---
+        //
+        // `gold` is the single primary accent now: CTAs, links, active states,
+        // the signature frequency-pulse visual, achievement/progress. One
+        // accent family, three depths, used deliberately rather than several
+        // competing brand colors.
+        gold: {
+          DEFAULT: "#C8A54B",   // primary gold - CTAs, active states, accents
+          deep: "#B8860B",      // hover/pressed states, higher-contrast text-on-gold
+          champagne: "#E8D7A5", // soft fills, subtle highlights, glows
+        },
+        // `navy` is kept only as a deep warm-ink tone for rare full-bleed dark
+        // sections (e.g. the "why students love it" band) - it is no longer a
+        // brand color, just a dark neutral that reads calmer than pure black
+        // next to gold.
         navy: {
-          DEFAULT: "#0A192F",
+          DEFAULT: "#1C1712",
         },
-        // AI accent - Electric Blue. Reserved for AI-related UI specifically
-        // (the chat widget, AI badges/highlights) - NOT a general-purpose
-        // button color. Named "ai" on purpose so future usage is checked
-        // against "is this actually AI-related" rather than reached for as
-        // a generic accent, which is what caused the previous primary CTA
-        // buttons to be the wrong color per the brand spec.
+        // Legacy token names kept so the rest of the app (dashboard, reader,
+        // chat, etc.) re-themes to gold automatically without touching every
+        // file - `ai-accent` and `achievement` now both resolve to the gold
+        // family. New code should reach for `gold` directly.
         ai: {
-          accent: "#00B4D8",
-          "accent-deep": "#0090AD",
+          accent: "#C8A54B",
+          "accent-deep": "#B8860B",
         },
-        // Achievement - Gold. Progress, streaks, badges, mastery.
         achievement: {
-          DEFAULT: "#FFD700",
-          deep: "#E6C200",
+          DEFAULT: "#C8A54B",
+          deep: "#B8860B",
         },
-        // Success / Danger: two shades each. DEFAULT is AA-contrast-checked
-        // for text/icons on the off-white background (raw spec hex fails
-        // WCAG AA for text - #10B981 measures ~2.5:1, #EF4444 ~3.8:1,  both
-        // under the 4.5:1 body-text minimum). `bright` uses the spec's exact
-        // hex for decorative fills/large elements where contrast math works
-        // differently (e.g. white text on a filled bright background).
+        // Success / Danger / Warning, AA-checked for text on the cream
+        // (#FCFBF7) background.
         success: {
-          DEFAULT: "#1D8A73",  // AA-safe for text/icons (~7.9:1 on off-white)
-          bright: "#10B981",   // spec's exact hex - fills, large elements only
+          DEFAULT: "#2E8B57",  // ~5.1:1 on cream
+          bright: "#3FA968",
         },
         danger: {
-          DEFAULT: "#C2492E",  // AA-safe for text/icons (~4.9:1 on off-white)
-          bright: "#EF4444",   // spec's exact hex - fills, large elements only
+          DEFAULT: "#C0392B",  // ~5.4:1 on cream
+          bright: "#DD5240",
+        },
+        warning: {
+          DEFAULT: "#B4670A",  // AA-safe text version of the spec's #D97706 (~3.4:1 fails on cream at #D97706 itself)
+          bright: "#D97706",
         },
       },
       fontFamily: {
@@ -66,8 +78,10 @@ const config: Config = {
         "grain": "radial-gradient(circle at 1px 1px, rgba(10,25,47,0.04) 1px, transparent 0)",
       },
       boxShadow: {
-        glow: "0 0 60px -12px rgba(10,25,47,0.35)",
-        "ai-glow": "0 0 60px -12px rgba(0,180,216,0.35)",
+        glow: "0 0 60px -12px rgba(200,165,75,0.45)",
+        "ai-glow": "0 0 60px -12px rgba(200,165,75,0.45)",
+        gold: "0 8px 24px -8px rgba(184,134,11,0.35)",
+        "gold-lg": "0 20px 50px -16px rgba(184,134,11,0.4)",
       },
       keyframes: {
         pulseBar: {
