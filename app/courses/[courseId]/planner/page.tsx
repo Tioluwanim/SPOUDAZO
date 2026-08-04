@@ -144,7 +144,13 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
 
         {!plan ? (
           <Card className="max-w-md p-6">
-            <div className="space-y-4">
+            <div className="mb-1 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gold/10 text-gold-deep">
+                <CalendarDays size={18} />
+              </span>
+              <p className="font-display text-base text-paper">Set your exam date</p>
+            </div>
+            <div className="mt-4 space-y-4">
               <div>
                 <label className="mb-1.5 block text-sm text-paper-dim">Exam date</label>
                 <input
@@ -190,6 +196,28 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
           </Card>
         ) : (
           <div className="space-y-6">
+            {(() => {
+              const total = plan.items.length;
+              const done = plan.items.filter((i) => i.completed).length;
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              return (
+                <div className="rounded-xl border border-ink-border bg-ink-surface p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-paper-dim">Plan progress</span>
+                    <span className="font-mono text-paper">
+                      {done}/{total} · {pct}%
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-ink-border">
+                    <div
+                      className="h-full rounded-full bg-gold transition-all duration-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-ink-border bg-ink-surface px-4 py-3 text-sm text-paper-dim">
               <span>
                 Exam on{" "}
@@ -236,14 +264,14 @@ export default function StudyPlannerPage({ params }: { params: { courseId: strin
                     {items.map((item) => (
                       <div
                         key={item.id}
-                        className="flex flex-col gap-2.5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                        className="flex flex-col gap-2.5 px-4 py-3 transition-colors hover:bg-gold/5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                       >
                         <button
                           onClick={() => toggleComplete(item)}
                           className="flex min-w-0 items-center gap-3 text-left focus-ring"
                         >
                           {item.completed ? (
-                            <CheckCircle2 size={18} className="shrink-0 text-teal-mastery" />
+                            <CheckCircle2 size={18} className="shrink-0 text-success" />
                           ) : (
                             <Circle size={18} className="shrink-0 text-paper-faint" />
                           )}
