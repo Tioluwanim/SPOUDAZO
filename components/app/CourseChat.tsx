@@ -50,7 +50,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
       <button
         onClick={() => setOpen(true)}
         aria-label="Ask about your notes"
-        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gold text-[#2B2B2B] shadow-gold-lg transition-transform hover:scale-105 focus-ring sm:bottom-6 sm:right-6"
+        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-gold text-[#2B2B2B] shadow-gold-lg transition-transform hover:scale-105 focus-ring lg:bottom-6 lg:right-6"
         style={{ display: open ? "none" : "flex" }}
       >
         <MessageCircle size={24} />
@@ -63,7 +63,7 @@ export function CourseChat({ courseId }: { courseId: number }) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.97 }}
             transition={{ type: "spring", damping: 24, stiffness: 300 }}
-            className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 left-4 z-40 flex h-[min(32rem,75vh)] flex-col overflow-hidden rounded-2xl border border-gold/20 bg-ink-surface shadow-2xl sm:left-auto sm:right-6 sm:bottom-6 sm:h-[32rem] sm:w-[23rem]"
+            className="fixed bottom-20 right-4 left-4 z-40 flex h-[min(28rem,65vh)] flex-col overflow-hidden rounded-2xl border border-gold/20 bg-ink-surface shadow-2xl lg:left-auto lg:right-6 lg:bottom-6 lg:h-[32rem] lg:w-[23rem]"
           >
             <div className="flex items-center justify-between border-b border-ink-border bg-ink px-4 py-3">
               <div className="flex items-center gap-2">
