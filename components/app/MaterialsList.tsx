@@ -1,3 +1,4 @@
+```tsx
 "use client";
 
 import { useState } from "react";
@@ -99,7 +100,7 @@ type MaterialsListProps = {
    * Called after a material has been successfully deleted.
    * The parent component uses this to remove the material from local state.
    *
-   * Material.doc_id is a string, so the callback must also receive a string.
+   * Material.doc_id is a string, so the callback also receives a string.
    */
   onDeleted?: (docId: string) => void;
 };
@@ -129,8 +130,7 @@ export function MaterialsList({
     event: React.MouseEvent<HTMLButtonElement>,
     docId: string
   ) {
-    // Prevent the button from triggering the Link when a ready material
-    // is wrapped inside a Link.
+    // Prevent the delete button from triggering the material Link.
     event.preventDefault();
     event.stopPropagation();
 
@@ -150,8 +150,8 @@ export function MaterialsList({
     try {
       setDeletingId(docId);
 
-      // Delete from the backend first.
-      await deleteMaterial(docId);
+      // The API expects both courseId and docId.
+      await deleteMaterial(courseId, docId);
 
       // Tell the parent component to remove the material from local state.
       onDeleted?.(docId);
@@ -304,3 +304,4 @@ export function MaterialsList({
     </div>
   );
 }
+```
