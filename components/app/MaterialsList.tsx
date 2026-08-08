@@ -297,4 +297,3 @@ export function MaterialsList({
     </div>
   );
 }
-```
