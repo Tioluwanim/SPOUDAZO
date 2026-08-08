@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { FileText, Trash2 } from "lucide-react";
 
@@ -97,8 +98,10 @@ type MaterialsListProps = {
   /**
    * Called after a material has been successfully deleted.
    * The parent component uses this to remove the material from local state.
+   *
+   * Material.doc_id is a string, so the callback must also receive a string.
    */
-  onDeleted?: (docId: number) => void;
+  onDeleted?: (docId: string) => void;
 };
 
 // -----------------------------------------------------------------------------
@@ -110,7 +113,7 @@ export function MaterialsList({
   courseId,
   onDeleted,
 }: MaterialsListProps) {
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   if (materials.length === 0) {
     return null;
@@ -124,13 +127,14 @@ export function MaterialsList({
 
   async function handleDelete(
     event: React.MouseEvent<HTMLButtonElement>,
-    docId: number
+    docId: string
   ) {
     // Prevent the button from triggering the Link when a ready material
     // is wrapped inside a Link.
     event.preventDefault();
     event.stopPropagation();
 
+    // Prevent multiple delete requests at the same time.
     if (deletingId !== null) {
       return;
     }
@@ -146,9 +150,10 @@ export function MaterialsList({
     try {
       setDeletingId(docId);
 
+      // Delete from the backend first.
       await deleteMaterial(docId);
 
-      // Tell the parent component to remove this material from state.
+      // Tell the parent component to remove the material from local state.
       onDeleted?.(docId);
     } catch (error) {
       console.error("Failed to delete material:", error);
@@ -162,6 +167,10 @@ export function MaterialsList({
       setDeletingId(null);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
     <div className="space-y-6">
@@ -180,94 +189,92 @@ export function MaterialsList({
                 "rounded-xl border border-ink-border bg-ink-surface/40 px-4 py-3 text-sm";
 
               const row = (
-                <>
-                  <div className="flex items-start gap-3">
-                    {/* File icon */}
-                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-surface text-paper-faint">
-                      <FileText size={16} />
+                <div className="flex items-start gap-3">
+                  {/* File icon */}
+                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink-surface text-paper-faint">
+                    <FileText size={16} />
+                  </div>
+
+                  {/* Material information */}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-paper">
+                          {m.filename}
+                        </p>
+
+                        {m.status === "ready" && (
+                          <p className="mt-0.5 text-xs text-paper-faint">
+                            {m.chunk_count} chunks
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Status + delete */}
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge
+                          tone={
+                            m.status === "ready"
+                              ? "teal"
+                              : m.status === "failed"
+                                ? "clay"
+                                : "amber"
+                          }
+                        >
+                          {m.status === "ready"
+                            ? "ready"
+                            : m.status === "failed"
+                              ? "failed"
+                              : "processing"}
+                        </Badge>
+
+                        <button
+                          type="button"
+                          onClick={(event) =>
+                            handleDelete(event, m.doc_id)
+                          }
+                          disabled={deletingId === m.doc_id}
+                          aria-label={`Delete ${m.filename}`}
+                          title="Delete material"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-paper-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {deletingId === m.doc_id ? (
+                            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          ) : (
+                            <Trash2 size={15} />
+                          )}
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Material information */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-paper">
-                            {m.filename}
-                          </p>
+                    {/* Processing progress */}
+                    {phase && (
+                      <div className="mt-2.5">
+                        <div className="mb-1.5 flex items-center justify-between text-xs">
+                          <span className="text-paper-faint">
+                            {phase.label}
+                          </span>
 
-                          {m.status === "ready" && (
-                            <p className="mt-0.5 text-xs text-paper-faint">
-                              {m.chunk_count} chunks
-                            </p>
+                          {phase.eta && (
+                            <span className="text-paper-faint">
+                              {phase.eta}
+                            </span>
                           )}
                         </div>
 
-                        {/* Status + delete */}
-                        <div className="flex shrink-0 items-center gap-2">
-                          <Badge
-                            tone={
-                              m.status === "ready"
-                                ? "teal"
-                                : m.status === "failed"
-                                  ? "clay"
-                                  : "amber"
-                            }
-                          >
-                            {m.status === "ready"
-                              ? "ready"
-                              : m.status === "failed"
-                                ? "failed"
-                                : "processing"}
-                          </Badge>
-
-                          <button
-                            type="button"
-                            onClick={(event) =>
-                              handleDelete(event, m.doc_id)
-                            }
-                            disabled={deletingId === m.doc_id}
-                            aria-label={`Delete ${m.filename}`}
-                            title="Delete material"
-                            className="flex h-8 w-8 items-center justify-center rounded-lg text-paper-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {deletingId === m.doc_id ? (
-                              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                            ) : (
-                              <Trash2 size={15} />
-                            )}
-                          </button>
-                        </div>
+                        <ProgressBar value={phase.percent} />
                       </div>
+                    )}
 
-                      {/* Processing progress */}
-                      {phase && (
-                        <div className="mt-2.5">
-                          <div className="mb-1.5 flex items-center justify-between text-xs">
-                            <span className="text-paper-faint">
-                              {phase.label}
-                            </span>
-
-                            {phase.eta && (
-                              <span className="text-paper-faint">
-                                {phase.eta}
-                              </span>
-                            )}
-                          </div>
-
-                          <ProgressBar value={phase.percent} />
-                        </div>
-                      )}
-
-                      {/* Failed state */}
-                      {m.status === "failed" && (
-                        <p className="mt-2 text-xs text-danger">
-                          Processing failed — try removing and
-                          re-uploading this file.
-                        </p>
-                      )}
-                    </div>
+                    {/* Failed state */}
+                    {m.status === "failed" && (
+                      <p className="mt-2 text-xs text-danger">
+                        Processing failed — try removing and
+                        re-uploading this file.
+                      </p>
+                    )}
                   </div>
-                </>
+                </div>
               );
 
               return (
