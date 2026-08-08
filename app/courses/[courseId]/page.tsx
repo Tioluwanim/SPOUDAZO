@@ -107,7 +107,11 @@ export default function CourseDetailPage({ params }: { params: { courseId: strin
             }
           />
           <div className="mt-4">
-            <MaterialsList materials={materials} courseId={courseId} />
+            <MaterialsList
+              materials={materials}
+              courseId={courseId}
+              onDeleted={(docId) => setMaterials((prev) => prev.filter((m) => m.doc_id !== docId))}
+            />
           </div>
         </section>
 
