@@ -116,6 +116,12 @@ export function getMaterialDetail(courseId: number, docId: string) {
   return request<MaterialDetail>(`/courses/${courseId}/materials/${docId}`);
 }
 
+export function deleteMaterial(courseId: number, docId: string) {
+  return request<void>(`/courses/${courseId}/materials/${docId}`, {
+    method: "DELETE",
+  });
+}
+
 // ── Reader: annotations, favorites, progress, AI actions ───────────────────
 
 export function createAnnotation(
