@@ -580,6 +580,25 @@ OPENROUTER_MODEL_CREATIVE = _env_str("OPENROUTER_MODEL_CREATIVE", "")
 OPENROUTER_MODEL_LONG_CONTEXT = _env_str("OPENROUTER_MODEL_LONG_CONTEXT", "")
 OPENROUTER_MODEL_SIMPLE = _env_str("OPENROUTER_MODEL_SIMPLE", "")
 
+# Vision OCR fallback - Tesseract (used for scanned-page OCR below) is a
+# printed-text engine; it cannot reliably read handwriting and cannot parse
+# math notation (fractions, exponents, integrals aren't linear text). For
+# pages where Tesseract's own confidence is low, we escalate to a vision-
+# capable LLM instead, which is dramatically better at both handwriting and
+# transcribing math into LaTeX. Not hardcoded to a specific model since
+# OpenRouter's free vision-capable lineup changes over time - check
+# https://openrouter.ai/models?modality=text%2Bimage-%3Etext for current
+# free options if this specific one stops working.
+VISION_OCR_ENABLED = _env_bool("VISION_OCR_ENABLED", True)
+VISION_MODEL = _env_str("VISION_MODEL", "google/gemma-4-31b-it:free")
+VISION_OCR_CONFIDENCE_THRESHOLD = _env_int("VISION_OCR_CONFIDENCE_THRESHOLD", 55)
+# Caps vision-LLM calls per document - free-tier OpenRouter rate limits
+# (order of 20/min, low hundreds/day as of writing) mean an unbounded
+# escalation on a long, entirely-handwritten scanned document could burn
+# through the daily budget on one upload. Pages beyond this cap keep
+# whatever Tesseract produced rather than escalating further.
+VISION_OCR_MAX_PAGES_PER_DOC = _env_int("VISION_OCR_MAX_PAGES_PER_DOC", 25)
+
 # =============================================================================
 # HUGGINGFACE
 # =============================================================================
@@ -883,6 +902,10 @@ __all__ = [
     "OPENROUTER_MODEL_CREATIVE",
     "OPENROUTER_MODEL_LONG_CONTEXT",
     "OPENROUTER_MODEL_SIMPLE",
+    "VISION_OCR_ENABLED",
+    "VISION_MODEL",
+    "VISION_OCR_CONFIDENCE_THRESHOLD",
+    "VISION_OCR_MAX_PAGES_PER_DOC",
 
     # HuggingFace
     "HUGGINGFACE_API_KEY",
