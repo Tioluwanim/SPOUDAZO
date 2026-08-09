@@ -733,15 +733,29 @@ class ExtractionService:
 # OCR helper
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _ocr_page(pdf_bytes: bytes, page_number: int, dpi: int = 350) -> str:
+def _ocr_page_with_confidence(pdf_bytes: bytes, page_number: int, dpi: int = 350) -> tuple[str, float, bytes]:
     """
-    Run OCR on a single PDF page with improved preprocessing.
+    Run OCR on a single PDF page with improved preprocessing, and also
+    report Tesseract's own mean confidence for the result (0-100).
     Pipeline: render → grayscale → deskew (optional) → Otsu threshold → tesseract
+
+    Also returns the *original* rendered page as PNG bytes (before Otsu
+    binarization, which throws away detail Tesseract doesn't need but a
+    vision model reading handwriting benefits from) - this is what gets
+    sent to the vision-OCR fallback in extraction_service.process() when
+    Tesseract's confidence on this page is too low to trust.
+
+    Confidence is Tesseract's own signal, not a text-length heuristic:
+    Tesseract will happily emit a confident-looking string of wrong
+    characters for handwriting it can't actually read, so "did it
+    produce non-empty text" doesn't tell you whether that text is
+    trustworthy. Mean word confidence does.
     """
     try:
         import pytesseract
         from pdf2image import convert_from_bytes
-        from PIL import Image, ImageFilter, ImageOps
+        from PIL import Image
+        import io
 
         images = convert_from_bytes(
             pdf_bytes,
@@ -752,7 +766,11 @@ def _ocr_page(pdf_bytes: bytes, page_number: int, dpi: int = 350) -> str:
             thread_count = 2,
         )
         if not images:
-            return ""
+            return "", 0.0, b""
+
+        original_buf = io.BytesIO()
+        images[0].save(original_buf, format="PNG")
+        original_png_bytes = original_buf.getvalue()
 
         img = images[0].convert("L")  # grayscale
 
@@ -767,20 +785,26 @@ def _ocr_page(pdf_bytes: bytes, page_number: int, dpi: int = 350) -> str:
         img = Image.fromarray(arr)
 
         # Try psm 3 (fully auto), fall back to psm 6 (uniform block)
+        best_text, best_confidence = "", 0.0
         for psm in (3, 6):
             config = f"--oem 3 --psm {psm} -l eng"
             try:
                 text = pytesseract.image_to_string(img, config=config)
-                if text.strip():
-                    return text
+                if not text.strip():
+                    continue
+                data = pytesseract.image_to_data(img, config=config, output_type=pytesseract.Output.DICT)
+                confidences = [c for c in data.get("conf", []) if isinstance(c, (int, float)) and c >= 0]
+                mean_conf = (sum(confidences) / len(confidences)) if confidences else 0.0
+                if mean_conf >= best_confidence:
+                    best_text, best_confidence = text, mean_conf
             except Exception:
                 continue
 
-        return ""
+        return best_text, best_confidence, original_png_bytes
 
     except Exception as e:
         logger.warning("OCR failed for page %d: %s", page_number + 1, e)
-        return ""
+        return "", 0.0, b""
 
 
 def _deskew(img) -> "Image":
