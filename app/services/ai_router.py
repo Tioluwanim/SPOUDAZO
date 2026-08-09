@@ -43,6 +43,7 @@ from app.config import (
     OPENROUTER_MODEL_SIMPLE,
     OPENROUTER_TIMEOUT,
     OPENROUTER_RATE_LIMIT_DELAY,
+    VISION_MODEL,
     GROQ_API_KEY,
     GROQ_MODEL,
     GROQ_BASE_URL,
@@ -241,6 +242,44 @@ class AIRouter:
         ]
         response = self._complete_with_fallback(messages, user_prompt, doc_id, slog, model)
         return response.answer
+
+    def transcribe_image(self, image_bytes: bytes, prompt: str, doc_id: str = "") -> str:
+        """
+        Sends a page image to a vision-capable model for transcription -
+        used as the OCR fallback for handwritten/math pages Tesseract
+        can't read reliably (see extraction_service.py). Deliberately
+        targets VISION_MODEL directly on OpenRouter rather than going
+        through the usual OpenRouter→Groq→HuggingFace text fallback
+        chain, since Groq/HF's configured models here aren't guaranteed
+        to support image input at all - a vision task needs a vision-
+        capable model specifically, not "whichever text model is up."
+        Returns "" on failure rather than raising, so a failed vision
+        call degrades to "keep whatever Tesseract produced" instead of
+        failing the whole page's extraction.
+        """
+        import base64
+
+        slog = ServiceLogger("ai_router", doc_id=doc_id)
+        b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+        try:
+            response = self.or_client.chat.completions.create(
+                model=VISION_MODEL,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                    ],
+                }],
+                timeout=OPENROUTER_TIMEOUT,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            slog.info("Vision OCR via %s produced %d chars", VISION_MODEL, len(text))
+            return text
+        except Exception as exc:
+            slog.error("Vision OCR call failed (model=%s): %s", VISION_MODEL, exc)
+            return ""
 
     def get_provider_status(self) -> dict:
         return {
