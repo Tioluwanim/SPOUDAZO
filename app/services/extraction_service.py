@@ -326,7 +326,7 @@ class ExtractionService:
                 raw_text = pdf[pn].get_text("text").strip()
 
                 if len(raw_text) < 50 and ocr_available:
-                    ocr_text = _ocr_page(pdf_bytes, pn, dpi=350 if pn > 0 else 400)
+                    ocr_text = _ocr_page_with_confidence(pdf_bytes, pn, dpi=350 if pn > 0 else 400)
                     text = self._clean_page_text(ocr_text)
                     if text:
                         ocr_page_count += 1
