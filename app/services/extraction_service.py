@@ -66,11 +66,15 @@ from html import unescape
 from pathlib import Path
 from typing import Optional
 from app.services.pdf_service import pdf_service
+from app.services.ai_router import ai_router
 from app.config import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     MIN_CHUNK_LENGTH,
     SECTION_KEYWORDS,
+    VISION_OCR_ENABLED,
+    VISION_OCR_CONFIDENCE_THRESHOLD,
+    VISION_OCR_MAX_PAGES_PER_DOC,
 )
 
 
