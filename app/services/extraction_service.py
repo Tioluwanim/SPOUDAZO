@@ -321,12 +321,50 @@ class ExtractionService:
 
             # Extract text page by page with OCR fallback
             ocr_available = _check_ocr()
+            vision_ocr_used = 0
             raw_pages: list[str] = []
             for pn in range(page_count):
                 raw_text = pdf[pn].get_text("text").strip()
 
                 if len(raw_text) < 50 and ocr_available:
-                    ocr_text = _ocr_page_with_confidence(pdf_bytes, pn, dpi=350 if pn > 0 else 400)
+                    ocr_text, ocr_confidence, page_image_bytes = _ocr_page_with_confidence(
+                        pdf_bytes, pn, dpi=350 if pn > 0 else 400
+                    )
+
+                    # Tesseract can emit confident-*looking* garbage on
+                    # handwriting/math it can't actually read - its own
+                    # mean word confidence is the signal for "should I
+                    # trust this," not just whether it produced any text.
+                    if (
+                        VISION_OCR_ENABLED
+                        and ocr_confidence < VISION_OCR_CONFIDENCE_THRESHOLD
+                        and page_image_bytes
+                        and vision_ocr_used < VISION_OCR_MAX_PAGES_PER_DOC
+                    ):
+                        vision_ocr_used += 1
+                        vision_text = ai_router.transcribe_image(
+                            page_image_bytes,
+                            prompt=(
+                                "Transcribe all text on this page exactly as written, including "
+                                "handwritten content. For mathematical notation (fractions, "
+                                "exponents, integrals, matrices, etc.), write it as LaTeX. "
+                                "Output only the transcription, no commentary."
+                            ),
+                            doc_id=f"ocr-page-{pn + 1}",
+                        )
+                        if vision_text:
+                            slog.debug(
+                                "Page %d: Tesseract confidence %.0f%% too low, used vision OCR instead (%d chars)",
+                                pn + 1, ocr_confidence, len(vision_text),
+                            )
+                            ocr_text = vision_text
+                        elif vision_ocr_used >= VISION_OCR_MAX_PAGES_PER_DOC:
+                            slog.warning(
+                                "Vision OCR page cap (%d) reached for this document - "
+                                "remaining low-confidence pages keep Tesseract's output as-is",
+                                VISION_OCR_MAX_PAGES_PER_DOC,
+                            )
+
                     text = self._clean_page_text(ocr_text)
                     if text:
                         ocr_page_count += 1
