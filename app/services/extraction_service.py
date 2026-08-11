@@ -62,6 +62,8 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
+import sys
 import time
 import uuid
 from collections import Counter
@@ -102,19 +104,21 @@ from app.utils.logger import get_logger, ServiceLogger
 logger = get_logger(__name__)
 
 
-# ── OCR / extraction safety limits ──────────────────────────────────────────
-# Override these with Render environment variables when needed.
+# ── OCR / extraction safety + performance controls ──────────────────────────
 EXTRACTION_TIMEOUT_SECONDS = max(60, int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "900")))
 OCR_MAX_PAGES_PER_DOC = max(1, int(os.getenv("OCR_MAX_PAGES_PER_DOC", "40")))
-OCR_DPI_FIRST_PAGE = max(150, int(os.getenv("OCR_DPI_FIRST_PAGE", "350")))
-OCR_DPI_BODY = max(150, int(os.getenv("OCR_DPI_BODY", "300")))
+OCR_DPI_FIRST_PAGE = max(150, int(os.getenv("OCR_DPI_FIRST_PAGE", "300")))
+OCR_DPI_BODY = max(150, int(os.getenv("OCR_DPI_BODY", "250")))
+OCR_PAGE_TIMEOUT_SECONDS = max(15, int(os.getenv("OCR_PAGE_TIMEOUT_SECONDS", "90")))
+TESSERACT_TIMEOUT_SECONDS = max(5, int(os.getenv("TESSERACT_TIMEOUT_SECONDS", "30")))
+VISION_OCR_TIMEOUT_SECONDS = max(5, int(os.getenv("VISION_OCR_TIMEOUT_SECONDS", "45")))
+OCR_PROGRESS_EVERY = max(1, int(os.getenv("OCR_PROGRESS_EVERY", "1")))
 OCR_DESKEW_ENABLED = os.getenv("OCR_DESKEW_ENABLED", "false").strip().lower() in {
     "1", "true", "yes", "on"
 }
-OCR_DESKEW_MAX_DIM = max(600, int(os.getenv("OCR_DESKEW_MAX_DIM", "1600")))
-TESSERACT_TIMEOUT_SECONDS = max(5, int(os.getenv("TESSERACT_TIMEOUT_SECONDS", "45")))
-VISION_OCR_TIMEOUT_SECONDS = max(5, int(os.getenv("VISION_OCR_TIMEOUT_SECONDS", "60")))
-OCR_PROGRESS_EVERY = max(1, int(os.getenv("OCR_PROGRESS_EVERY", "1")))
+OCR_DESKEW_MAX_DIM = max(600, int(os.getenv("OCR_DESKEW_MAX_DIM", "1400")))
+OCR_MAX_IMAGE_PIXELS = max(1_000_000, int(os.getenv("OCR_MAX_IMAGE_PIXELS", "18_000_000")))
+OCR_LANGUAGE = os.getenv("OCR_LANGUAGE", "eng")
 
 
 # ── Unicode / ligature normalisation ─────────────────────────────────────────
@@ -344,21 +348,25 @@ class ExtractionService:
                                 font_sizes.append(sz)
 
             # Extract text page by page with OCR fallback.
+            # Each OCR page is isolated so one pathological page cannot block
+            # the whole extraction worker.
             ocr_available = _check_ocr()
             vision_ocr_used = 0
             raw_pages: list[str] = []
             ocr_cap_warned = False
 
             slog.info(
-                "Extraction started: %d pages | OCR=%s | OCR page cap=%d | timeout=%ds",
+                "Extraction started: %d pages | OCR=%s | OCR cap=%d | "
+                "document timeout=%ds | page timeout=%ds",
                 page_count, ocr_available, OCR_MAX_PAGES_PER_DOC,
-                EXTRACTION_TIMEOUT_SECONDS,
+                EXTRACTION_TIMEOUT_SECONDS, OCR_PAGE_TIMEOUT_SECONDS,
             )
 
             for pn in range(page_count):
-                if time.monotonic() >= extraction_deadline:
+                elapsed = time.monotonic() - extraction_started
+                if elapsed >= EXTRACTION_TIMEOUT_SECONDS:
                     raise TimeoutError(
-                        f"Extraction timeout after {int(time.monotonic() - extraction_started)}s "
+                        f"Extraction timeout after {int(elapsed)}s "
                         f"({pn}/{page_count} pages processed; {ocr_page_count} OCR pages)"
                     )
 
@@ -368,8 +376,8 @@ class ExtractionService:
                 if needs_ocr and ocr_pages_attempted >= OCR_MAX_PAGES_PER_DOC:
                     if not ocr_cap_warned:
                         slog.warning(
-                            "OCR page cap (%d) reached; remaining scanned pages "
-                            "will keep their extracted text as-is",
+                            "OCR cap reached at %d pages; remaining scanned pages "
+                            "will use native PDF text only",
                             OCR_MAX_PAGES_PER_DOC,
                         )
                         ocr_cap_warned = True
@@ -378,25 +386,55 @@ class ExtractionService:
                 elif needs_ocr:
                     ocr_pages_attempted += 1
                     dpi = OCR_DPI_FIRST_PAGE if pn == 0 else OCR_DPI_BODY
-
                     slog.info(
-                        "Page %d/%d: OCR starting (%d/%d OCR pages, dpi=%d)",
+                        "Page %d/%d: OCR queued | OCR page %d/%d | dpi=%d",
                         pn + 1, page_count, ocr_pages_attempted,
                         OCR_MAX_PAGES_PER_DOC, dpi,
                     )
 
-                    ocr_started = time.monotonic()
-                    ocr_text, ocr_confidence, page_image_bytes = _ocr_page_with_confidence(
-                        pdf_bytes, pn, dpi=dpi, deadline=extraction_deadline
+                    remaining = max(
+                        1,
+                        int(EXTRACTION_TIMEOUT_SECONDS - (
+                            time.monotonic() - extraction_started
+                        )),
                     )
-                    slog.info(
-                        "Page %d/%d: Tesseract finished in %.1fs, confidence=%.0f%%, chars=%d",
-                        pn + 1, page_count, time.monotonic() - ocr_started,
-                        ocr_confidence, len(ocr_text),
-                    )
+                    page_timeout = min(OCR_PAGE_TIMEOUT_SECONDS, remaining)
 
+                    ocr_started = time.monotonic()
+                    (
+                        ocr_text,
+                        ocr_confidence,
+                        page_image_bytes,
+                        ocr_status,
+                    ) = _ocr_page_isolated(
+                        pdf_bytes=pdf_bytes,
+                        page_number=pn,
+                        dpi=dpi,
+                        page_timeout_seconds=page_timeout,
+                    )
+                    ocr_elapsed = time.monotonic() - ocr_started
+
+                    if ocr_status == "timeout":
+                        slog.warning(
+                            "Page %d/%d: OCR TIMEOUT after %.1fs; continuing",
+                            pn + 1, page_count, ocr_elapsed,
+                        )
+                    elif ocr_status != "ok":
+                        slog.warning(
+                            "Page %d/%d: OCR failed (%s) after %.1fs",
+                            pn + 1, page_count, ocr_status, ocr_elapsed,
+                        )
+                    else:
+                        slog.info(
+                            "Page %d/%d: OCR complete in %.1fs | confidence=%.0f%% | chars=%d",
+                            pn + 1, page_count, ocr_elapsed,
+                            ocr_confidence, len(ocr_text),
+                        )
+
+                    # Vision is a selective fallback, never the primary path.
                     if (
-                        VISION_OCR_ENABLED
+                        ocr_status == "ok"
+                        and VISION_OCR_ENABLED
                         and ocr_confidence < VISION_OCR_CONFIDENCE_THRESHOLD
                         and page_image_bytes
                         and vision_ocr_used < VISION_OCR_MAX_PAGES_PER_DOC
@@ -404,10 +442,21 @@ class ExtractionService:
                         from app.services.ai_router import ai_router
 
                         vision_ocr_used += 1
+                        vision_started = time.monotonic()
+                        remaining = max(
+                            1,
+                            int(EXTRACTION_TIMEOUT_SECONDS - (
+                                time.monotonic() - extraction_started
+                            )),
+                        )
+                        vision_timeout = min(
+                            VISION_OCR_TIMEOUT_SECONDS, remaining
+                        )
+
                         slog.info(
-                            "Page %d/%d: vision OCR starting (%d/%d vision pages)",
+                            "Page %d/%d: vision OCR starting | %d/%d | timeout=%ds",
                             pn + 1, page_count, vision_ocr_used,
-                            VISION_OCR_MAX_PAGES_PER_DOC,
+                            VISION_OCR_MAX_PAGES_PER_DOC, vision_timeout,
                         )
 
                         vision_text = _transcribe_image_with_timeout(
@@ -417,25 +466,24 @@ class ExtractionService:
                                 "Transcribe all text on this page exactly as written, including "
                                 "handwritten content. For mathematical notation (fractions, "
                                 "exponents, integrals, matrices, etc.), write it as LaTeX. "
+                                "Preserve headings, lists, equations, and meaningful line breaks. "
                                 "Output only the transcription, no commentary."
                             ),
                             doc_id=f"ocr-page-{pn + 1}",
-                            timeout_seconds=min(
-                                VISION_OCR_TIMEOUT_SECONDS,
-                                max(1, int(extraction_deadline - time.monotonic())),
-                            ),
+                            timeout_seconds=vision_timeout,
                         )
 
                         if vision_text:
                             slog.info(
-                                "Page %d/%d: vision OCR finished (%d chars)",
-                                pn + 1, page_count, len(vision_text),
+                                "Page %d/%d: vision OCR complete in %.1fs | chars=%d",
+                                pn + 1, page_count,
+                                time.monotonic() - vision_started,
+                                len(vision_text),
                             )
                             ocr_text = vision_text
                         else:
                             slog.warning(
-                                "Page %d/%d: vision OCR returned no text or timed out; "
-                                "keeping Tesseract output",
+                                "Page %d/%d: vision OCR empty/timeout; keeping Tesseract output",
                                 pn + 1, page_count,
                             )
 
@@ -447,8 +495,8 @@ class ExtractionService:
 
                     if (pn + 1) % OCR_PROGRESS_EVERY == 0 or pn == page_count - 1:
                         slog.info(
-                            "Extraction progress: %d/%d pages | OCR=%d | elapsed=%ds",
-                            pn + 1, page_count, ocr_page_count,
+                            "Extraction progress: %d/%d pages | OCR=%d | vision=%d | elapsed=%ds",
+                            pn + 1, page_count, ocr_page_count, vision_ocr_used,
                             int(time.monotonic() - extraction_started),
                         )
                 else:
@@ -855,27 +903,90 @@ class ExtractionService:
 # OCR helper
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _ocr_page_with_confidence(
+def _ocr_page_isolated(
+    *,
     pdf_bytes: bytes,
     page_number: int,
-    dpi: int = 300,
-    deadline: float | None = None,
-) -> tuple[str, float, bytes]:
-    """OCR one page with bounded work suitable for small Render CPU instances."""
+    dpi: int,
+    page_timeout_seconds: int,
+) -> tuple[str, float, bytes, str]:
+    """Run one OCR page in a killable child process."""
+    import base64
+    import multiprocessing as mp
+
+    ctx = mp.get_context("fork" if sys.platform != "win32" else "spawn")
+    queue = ctx.Queue(maxsize=1)
+    process = ctx.Process(
+        target=_ocr_page_worker,
+        args=(queue, pdf_bytes, page_number, dpi),
+        daemon=True,
+    )
+
+    started = time.monotonic()
+    process.start()
+
     try:
+        process.join(timeout=page_timeout_seconds)
+
+        if process.is_alive():
+            slog.warning(
+                "OCR subprocess timeout: page=%d elapsed=%.1fs; terminating",
+                page_number + 1, time.monotonic() - started,
+            )
+            process.terminate()
+            process.join(timeout=3)
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=2)
+            return "", 0.0, b"", "timeout"
+
+        if queue.empty():
+            return "", 0.0, b"", "failed"
+
+        result = queue.get_nowait()
+        if result.get("status") != "ok":
+            return "", 0.0, b"", "failed"
+
+        image_b64 = result.get("image", "")
+        image_bytes = base64.b64decode(image_b64) if image_b64 else b""
+        return (
+            result.get("text", ""),
+            float(result.get("confidence", 0.0)),
+            image_bytes,
+            "ok",
+        )
+    except Exception as exc:
+        slog.exception(
+            "OCR subprocess error on page %d: %s", page_number + 1, exc
+        )
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
+        return "", 0.0, b"", "failed"
+    finally:
+        try:
+            queue.close()
+            queue.join_thread()
+        except Exception:
+            pass
+
+
+def _ocr_page_worker(queue, pdf_bytes: bytes, page_number: int, dpi: int) -> None:
+    """Child-process OCR implementation."""
+    try:
+        import base64
         import io
+
         import numpy as np
         import pytesseract
         from pdf2image import convert_from_bytes
         from PIL import Image
 
-        def check_deadline() -> None:
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"OCR deadline reached on page {page_number + 1}"
-                )
+        started = time.monotonic()
 
-        check_deadline()
+        # pdftocairo is generally efficient for raster rendering and avoids
+        # unnecessary intermediate work in Poppler for PNG output.
+        render_started = time.monotonic()
         images = convert_from_bytes(
             pdf_bytes,
             dpi=dpi,
@@ -883,38 +994,49 @@ def _ocr_page_with_confidence(
             last_page=page_number + 1,
             fmt="PNG",
             thread_count=1,
+            use_pdftocairo=True,
         )
-        if not images:
-            return "", 0.0, b""
+        render_elapsed = time.monotonic() - render_started
 
-        check_deadline()
+        if not images:
+            queue.put({"status": "failed"})
+            return
 
         original_buf = io.BytesIO()
         images[0].save(original_buf, format="PNG", optimize=True)
         original_png_bytes = original_buf.getvalue()
 
         img = images[0].convert("L")
+
+        # Protect NumPy/Tesseract from pathological page dimensions.
+        pixels = img.width * img.height
+        if pixels > OCR_MAX_IMAGE_PIXELS:
+            scale = (OCR_MAX_IMAGE_PIXELS / pixels) ** 0.5
+            img = img.resize(
+                (
+                    max(1, int(img.width * scale)),
+                    max(1, int(img.height * scale)),
+                ),
+                Image.Resampling.LANCZOS,
+            )
+
         if OCR_DESKEW_ENABLED:
             img = _deskew(img)
 
-        check_deadline()
-
-        arr = np.array(img)
-        thresh = _otsu_threshold(arr)
-        img = Image.fromarray((arr > thresh).astype(np.uint8) * 255)
+        arr = np.asarray(img)
+        threshold = _otsu_threshold(arr)
+        img = Image.fromarray(
+            (arr > threshold).astype(np.uint8) * 255
+        )
 
         def run_tesseract(psm: int) -> tuple[str, float]:
-            check_deadline()
-            timeout = min(
-                TESSERACT_TIMEOUT_SECONDS,
-                max(1, int(deadline - time.monotonic()))
-                if deadline is not None else TESSERACT_TIMEOUT_SECONDS,
-            )
-            config = f"--oem 3 --psm {psm} -l eng"
-
+            config = f"--oem 3 --psm {psm} -l {OCR_LANGUAGE}"
             ocr_text = pytesseract.image_to_string(
-                img, config=config, timeout=timeout
+                img,
+                config=config,
+                timeout=TESSERACT_TIMEOUT_SECONDS,
             )
+
             if not ocr_text.strip():
                 return "", 0.0
 
@@ -922,8 +1044,9 @@ def _ocr_page_with_confidence(
                 img,
                 config=config,
                 output_type=pytesseract.Output.DICT,
-                timeout=timeout,
+                timeout=TESSERACT_TIMEOUT_SECONDS,
             )
+
             confidences = []
             for value in data.get("conf", []):
                 try:
@@ -933,53 +1056,80 @@ def _ocr_page_with_confidence(
                 except (TypeError, ValueError):
                     pass
 
-            mean_conf = (
+            confidence = (
                 sum(confidences) / len(confidences)
                 if confidences else 0.0
             )
-            return ocr_text, mean_conf
+            return ocr_text, confidence
 
-        best_text, best_confidence = "", 0.0
-
+        tesseract_started = time.monotonic()
         try:
             best_text, best_confidence = run_tesseract(3)
-        except Exception as exc:
-            logger.warning(
-                "Tesseract psm 3 failed for page %d: %s",
-                page_number + 1, exc,
-            )
+        except Exception:
+            best_text, best_confidence = "", 0.0
 
-        # Only pay for psm 6 when psm 3 actually looks weak.
+        # Only perform the second full OCR pass when it has a reason to help.
         if best_confidence < 65.0:
             try:
                 fallback_text, fallback_confidence = run_tesseract(6)
                 if fallback_confidence > best_confidence:
-                    best_text, best_confidence = (
-                        fallback_text, fallback_confidence
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Tesseract psm 6 failed for page %d: %s",
-                    page_number + 1, exc,
-                )
+                    best_text = fallback_text
+                    best_confidence = fallback_confidence
+            except Exception:
+                pass
 
-        return best_text, best_confidence, original_png_bytes
-
-    except TimeoutError:
-        raise
-    except Exception as exc:
-        logger.warning(
-            "OCR failed for page %d: %s", page_number + 1, exc
+        slog.info(
+            "OCR worker page %d: render=%.1fs | tesseract=%.1fs | total=%.1fs",
+            page_number + 1,
+            render_elapsed,
+            time.monotonic() - tesseract_started,
+            time.monotonic() - started,
         )
-        return "", 0.0, b""
+
+        queue.put({
+            "status": "ok",
+            "text": best_text,
+            "confidence": best_confidence,
+            "image": base64.b64encode(original_png_bytes).decode("ascii"),
+        })
+
+    except Exception as exc:
+        try:
+            queue.put({"status": "failed", "error": str(exc)})
+        except Exception:
+            pass
+
+
+def _ocr_page_with_confidence(
+    pdf_bytes: bytes,
+    page_number: int,
+    dpi: int = 300,
+    deadline: float | None = None,
+) -> tuple[str, float, bytes]:
+    """Backward-compatible wrapper around the isolated OCR worker."""
+    if deadline is not None:
+        remaining = int(deadline - time.monotonic())
+        if remaining <= 0:
+            raise TimeoutError(f"OCR deadline reached on page {page_number + 1}")
+        timeout = min(OCR_PAGE_TIMEOUT_SECONDS, remaining)
+    else:
+        timeout = OCR_PAGE_TIMEOUT_SECONDS
+
+    text, confidence, image, status = _ocr_page_isolated(
+        pdf_bytes=pdf_bytes,
+        page_number=page_number,
+        dpi=dpi,
+        page_timeout_seconds=timeout,
+    )
+    if status == "timeout":
+        raise TimeoutError(
+            f"OCR timed out on page {page_number + 1} after {timeout}s"
+        )
+    return text, confidence, image
 
 
 def _deskew(img) -> "Image":
-    """
-    Cheap optional deskew: estimate angle on a downsampled copy, then rotate
-    the original once. Disabled by default because the previous 11 full-size
-    scipy rotations were a major CPU bottleneck.
-    """
+    """Optional cheap deskew; disabled by default."""
     try:
         import numpy as np
         from PIL import Image
@@ -999,7 +1149,7 @@ def _deskew(img) -> "Image":
                 Image.Resampling.BILINEAR,
             )
 
-        arr = np.array(work)
+        arr = np.asarray(work)
         if np.count_nonzero(arr < 128) < 100:
             return original
 
@@ -1011,8 +1161,7 @@ def _deskew(img) -> "Image":
                 arr, angle, reshape=False, cval=255,
                 order=1, prefilter=False,
             )
-            darkness = 255.0 - rotated
-            projection = np.sum(darkness, axis=1)
+            projection = np.sum(255.0 - rotated, axis=1)
             score = float(np.var(projection))
             if score > best_score:
                 best_score = score
@@ -1022,11 +1171,10 @@ def _deskew(img) -> "Image":
             return original
 
         corrected = rotate(
-            np.array(original), best_angle, reshape=False, cval=255,
-            order=1, prefilter=False,
+            np.asarray(original), best_angle, reshape=False,
+            cval=255, order=1, prefilter=False,
         ).astype("uint8")
         return Image.fromarray(corrected)
-
     except Exception:
         return img
 
@@ -1039,7 +1187,7 @@ def _transcribe_image_with_timeout(
     doc_id: str,
     timeout_seconds: int,
 ) -> str:
-    """Prevent a stuck vision provider from blocking extraction forever."""
+    """Bound a network vision-OCR call without blocking extraction forever."""
     if timeout_seconds <= 0:
         return ""
 
@@ -1056,16 +1204,15 @@ def _transcribe_image_with_timeout(
         return future.result(timeout=timeout_seconds) or ""
     except FutureTimeout:
         future.cancel()
-        logger.warning(
-            "Vision OCR timed out after %ds for %s",
-            timeout_seconds, doc_id,
+        slog.warning(
+            "Vision OCR timeout: %s after %ds",
+            doc_id, timeout_seconds,
         )
         return ""
     except Exception as exc:
-        logger.warning("Vision OCR failed for %s: %s", doc_id, exc)
+        slog.warning("Vision OCR failed: %s (%s)", doc_id, exc)
         return ""
     finally:
-        # Do not wait for a stuck network request during extraction shutdown.
         executor.shutdown(wait=False, cancel_futures=True)
 
 
