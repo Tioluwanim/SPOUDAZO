@@ -19,8 +19,8 @@ SECOND   → Groq  https://api.groq.com/openai/v1
            degraded, this is a real independent second opinion.
 
 FALLBACK → HuggingFace Inference Providers  https://router.huggingface.co/v1
-           Model: "meta-llama/Llama-3.1-8B-Instruct:cerebras"
-           Uses :auto suffix to auto-select best available provider.
+           Model configured by HUGGINGFACE_MODEL (recommended to use a currently live HF Inference Provider model)
+           Uses the configured HuggingFace Inference Provider model.
            OpenAI-compatible. Token needs "Make calls to Inference Providers" scope.
            Docs: https://huggingface.co/docs/inference-providers
 
@@ -29,8 +29,10 @@ All three use the openai SDK — identical interface for streaming and non-strea
 
 from __future__ import annotations
 
+import random
 import time
 import logging
+import threading
 from typing import Generator, Iterator
 
 from app.config import (
@@ -62,6 +64,65 @@ from app.services.task_classifier import TaskType
 from app.utils.logger import get_logger, ServiceLogger
 
 logger = get_logger(__name__)
+
+# ── Production routing controls ──────────────────────────────────────────────
+# These are intentionally conservative for a small Render instance.
+PROVIDER_COOLDOWN_SECONDS = 20
+RATE_LIMIT_COOLDOWN_SECONDS = 8
+MAX_RETRY_BACKOFF_SECONDS = 8
+FIRST_TOKEN_TIMEOUT_SECONDS = 35
+
+# Do not retry permanent client/configuration failures.
+_PERMANENT_HTTP_ERRORS = {400, 401, 403, 404, 422}
+
+# Provider state is process-local. This prevents a broken provider from being
+# hammered repeatedly by every request while still allowing automatic recovery.
+_PROVIDER_STATE_LOCK = threading.Lock()
+_PROVIDER_UNAVAILABLE_UNTIL: dict[str, float] = {}
+_PROVIDER_FAILURES: dict[str, int] = {}
+
+
+def _provider_is_available(provider: str) -> bool:
+    now = time.monotonic()
+    with _PROVIDER_STATE_LOCK:
+        return now >= _PROVIDER_UNAVAILABLE_UNTIL.get(provider, 0.0)
+
+
+def _mark_provider_failure(
+    provider: str,
+    *,
+    status: int | None = None,
+) -> None:
+    now = time.monotonic()
+
+    if status in _PERMANENT_HTTP_ERRORS:
+        cooldown = PROVIDER_COOLDOWN_SECONDS * 6
+    elif status == 429:
+        cooldown = RATE_LIMIT_COOLDOWN_SECONDS
+    else:
+        cooldown = PROVIDER_COOLDOWN_SECONDS
+
+    with _PROVIDER_STATE_LOCK:
+        failures = _PROVIDER_FAILURES.get(provider, 0) + 1
+        _PROVIDER_FAILURES[provider] = failures
+        _PROVIDER_UNAVAILABLE_UNTIL[provider] = now + cooldown
+
+
+def _mark_provider_success(provider: str) -> None:
+    with _PROVIDER_STATE_LOCK:
+        _PROVIDER_FAILURES.pop(provider, None)
+        _PROVIDER_UNAVAILABLE_UNTIL.pop(provider, None)
+
+
+def _retry_delay(attempt: int, *, base: float = 1.0) -> float:
+    """Exponential backoff with small jitter to avoid synchronized retries."""
+    exponential = min(
+        MAX_RETRY_BACKOFF_SECONDS,
+        base * (2 ** max(0, attempt - 1)),
+    )
+    return exponential + random.uniform(0, min(0.5, exponential * 0.15))
+
+
 
 _SYSTEM = (
     "You are Spoudazõ's study buddy - a warm, encouraging presence helping a Nigerian "
@@ -164,8 +225,16 @@ class AIRouter:
         # Use configured model or fall back to free router
         self._or_model = OPENROUTER_MODEL or _OR_FREE_ROUTER
         logger.info(
-            "AIRouter ready — OR model=%s  Groq model=%s (configured=%s)  HF model=%s  HF url=%s",
-            self._or_model, GROQ_MODEL, bool(GROQ_API_KEY), HUGGINGFACE_MODEL, HUGGINGFACE_BASE_URL,
+            "AIRouter ready — OR=%s (%s) | Groq=%s (%s) | HF=%s | "
+            "timeouts OR=%ss/Groq=%ss/HF=%ss",
+            self._or_model,
+            "configured" if OPENROUTER_API_KEY else "disabled",
+            GROQ_MODEL,
+            "configured" if GROQ_API_KEY else "disabled",
+            HUGGINGFACE_MODEL,
+            OPENROUTER_TIMEOUT,
+            GROQ_TIMEOUT,
+            HUGGINGFACE_TIMEOUT,
         )
 
     # ── Lazy clients ──────────────────────────────────────────────────────────
@@ -243,24 +312,47 @@ class AIRouter:
         response = self._complete_with_fallback(messages, user_prompt, doc_id, slog, model)
         return response.answer
 
-    def transcribe_image(self, image_bytes: bytes, prompt: str, doc_id: str = "") -> str:
+    def transcribe_image(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        doc_id: str = "",
+    ) -> str:
         """
-        Sends a page image to a vision-capable model for transcription -
-        used as the OCR fallback for handwritten/math pages Tesseract
-        can't read reliably (see extraction_service.py). Deliberately
-        targets VISION_MODEL directly on OpenRouter rather than going
-        through the usual OpenRouter→Groq→HuggingFace text fallback
-        chain, since Groq/HF's configured models here aren't guaranteed
-        to support image input at all - a vision task needs a vision-
-        capable model specifically, not "whichever text model is up."
-        Returns "" on failure rather than raising, so a failed vision
-        call degrades to "keep whatever Tesseract produced" instead of
-        failing the whole page's extraction.
+        Vision OCR is deliberately isolated from the normal text fallback chain.
+
+        The extraction service already bounds the call duration. This method
+        additionally rejects obviously invalid/oversized payloads and avoids
+        retrying permanent API errors.
         """
         import base64
 
         slog = ServiceLogger("ai_router", doc_id=doc_id)
-        b64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+        if not image_bytes:
+            slog.warning("Vision OCR skipped — empty image payload")
+            return ""
+
+        # Avoid turning a huge rendered page into a massive JSON request.
+        max_image_bytes = 12 * 1024 * 1024
+        if len(image_bytes) > max_image_bytes:
+            slog.warning(
+                "Vision OCR skipped — image payload %.1f MB exceeds %.1f MB limit",
+                len(image_bytes) / (1024 * 1024),
+                max_image_bytes / (1024 * 1024),
+            )
+            return ""
+
+        if not OPENROUTER_API_KEY:
+            slog.warning("Vision OCR skipped — OpenRouter API key unavailable")
+            return ""
+
+        if not _provider_is_available("openrouter_vision"):
+            slog.warning("Vision OCR skipped — OpenRouter vision temporarily cooled down")
+            return ""
+
+        started = time.monotonic()
+        b64_image = base64.b64encode(image_bytes).decode("ascii")
 
         try:
             response = self.or_client.chat.completions.create(
@@ -269,32 +361,93 @@ class AIRouter:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_image}"}},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{b64_image}"
+                            },
+                        },
                     ],
                 }],
+                max_tokens=MAX_TOKENS,
+                temperature=max(float(TEMPERATURE), 0.01),
+                stream=False,
                 timeout=OPENROUTER_TIMEOUT,
             )
-            text = (response.choices[0].message.content or "").strip()
-            slog.info("Vision OCR via %s produced %d chars", VISION_MODEL, len(text))
+
+            text = (
+                response.choices[0].message.content
+                if response.choices
+                else ""
+            ) or ""
+            text = text.strip()
+
+            if text:
+                _mark_provider_success("openrouter_vision")
+                slog.info(
+                    "Vision OCR complete — model=%s chars=%d elapsed=%.1fs",
+                    VISION_MODEL,
+                    len(text),
+                    time.monotonic() - started,
+                )
+            else:
+                slog.warning(
+                    "Vision OCR returned empty content — model=%s elapsed=%.1fs",
+                    VISION_MODEL,
+                    time.monotonic() - started,
+                )
+
             return text
+
         except Exception as exc:
-            slog.error("Vision OCR call failed (model=%s): %s", VISION_MODEL, exc)
+            status = _http_status(exc)
+            _mark_provider_failure("openrouter_vision", status=status)
+            slog.warning(
+                "Vision OCR failed — model=%s status=%s elapsed=%.1fs: %s",
+                VISION_MODEL,
+                status or "network",
+                time.monotonic() - started,
+                _error_body(exc),
+            )
             return ""
 
     def get_provider_status(self) -> dict:
+        now = time.monotonic()
+
+        def state(provider: str) -> dict:
+            with _PROVIDER_STATE_LOCK:
+                until = _PROVIDER_UNAVAILABLE_UNTIL.get(provider, 0.0)
+                failures = _PROVIDER_FAILURES.get(provider, 0)
+
+            return {
+                "healthy": now >= until,
+                "failures": failures,
+                "cooldown_remaining_s": round(max(0.0, until - now), 1),
+            }
+
         return {
-            "openrouter" : {
+            "openrouter": {
                 "configured": bool(OPENROUTER_API_KEY),
-                "model"     : self._or_model,
-                "task_overrides": {k: v for k, v in _TASK_MODEL_OVERRIDES.items() if v},
+                "model": self._or_model,
+                "task_overrides": {
+                    k: v for k, v in _TASK_MODEL_OVERRIDES.items() if v
+                },
+                **state("openrouter"),
             },
             "groq": {
                 "configured": bool(GROQ_API_KEY),
-                "model"     : GROQ_MODEL,
+                "model": GROQ_MODEL,
+                **state("groq"),
             },
             "huggingface": {
                 "configured": bool(HUGGINGFACE_API_KEY),
-                "model"     : HUGGINGFACE_MODEL,
+                "model": HUGGINGFACE_MODEL,
+                **state("huggingface"),
+            },
+            "vision": {
+                "configured": bool(OPENROUTER_API_KEY),
+                "model": VISION_MODEL,
+                **state("openrouter_vision"),
             },
         }
 
@@ -302,294 +455,290 @@ class AIRouter:
 
     def _stream_with_fallback(
         self,
-        messages : list[dict],
-        slog     : ServiceLogger,
-        model    : str,
+        messages: list[dict],
+        slog: ServiceLogger,
+        model: str,
     ) -> Generator[str, None, None]:
-        # Peek the first chunk rather than list(generator) - buffering the
-        # WHOLE response before yielding anything would make this
-        # indistinguishable from a blocking call to the caller (nothing
-        # shown until generation finishes, then everything at once). We
-        # still need SOME way to detect "this provider returned nothing at
-        # all" to fall through to the next one, so we consume exactly one
-        # chunk to check, then yield it and continue lazily from there.
+        """
+        Stream from the first healthy provider that produces a real chunk.
 
-        # Primary: OpenRouter
-        if OPENROUTER_API_KEY:
+        A provider is only considered successful after the first chunk arrives.
+        That prevents an empty/failed stream from looking like a successful
+        response and gives the next provider a chance.
+        """
+        providers = []
+
+        if OPENROUTER_API_KEY and _provider_is_available("openrouter"):
+            providers.append(
+                ("OpenRouter", lambda: self._stream_openrouter(messages, slog, model))
+            )
+
+        if GROQ_API_KEY and _provider_is_available("groq"):
+            providers.append(
+                ("Groq", lambda: self._stream_groq(messages, slog))
+            )
+
+        if HUGGINGFACE_API_KEY and _provider_is_available("huggingface"):
+            providers.append(
+                ("HuggingFace", lambda: self._stream_huggingface(messages, slog))
+            )
+
+        if not providers:
+            slog.error("No healthy LLM providers available")
+            yield self._unavailable_message()
+            return
+
+        for provider_name, factory in providers:
             try:
-                slog.info("Streaming via OpenRouter (%s) …", model)
-                gen = self._stream_openrouter(messages, slog, model)
+                slog.info("Streaming via %s …", provider_name)
+                gen = factory()
+
                 first_chunk = next(gen, None)
-                if first_chunk is not None:
+                if first_chunk:
+                    _mark_provider_success(provider_name.lower())
                     yield first_chunk
                     yield from gen
                     return
-                slog.warning("OpenRouter returned empty stream — trying Groq")
-            except Exception as e:
-                _log_error("OpenRouter", e, slog)
-        else:
-            slog.warning("OPENROUTER_API_KEY not set — skipping primary")
 
-        # Second: Groq - a genuinely separate provider, not another route
-        # through the same OpenRouter aggregator.
-        if GROQ_API_KEY:
-            try:
-                slog.info("Streaming via Groq (%s) …", GROQ_MODEL)
-                gen = self._stream_groq(messages, slog)
-                first_chunk = next(gen, None)
-                if first_chunk is not None:
-                    yield first_chunk
-                    yield from gen
-                    return
-                slog.warning("Groq returned empty stream — trying HuggingFace")
-            except Exception as e:
-                _log_error("Groq", e, slog)
-        else:
-            slog.warning("GROQ_API_KEY not set — skipping second provider")
+                slog.warning("%s returned an empty stream — trying next provider", provider_name)
+                _mark_provider_failure(provider_name.lower())
 
-        # Fallback: HuggingFace
-        if HUGGINGFACE_API_KEY:
-            try:
-                slog.info("Streaming via HuggingFace (%s) …", HUGGINGFACE_MODEL)
-                gen = self._stream_huggingface(messages, slog)
-                first_chunk = next(gen, None)
-                if first_chunk is not None:
-                    yield first_chunk
-                    yield from gen
-                    return
-                slog.error("HuggingFace also returned empty stream")
-            except Exception as e:
-                _log_error("HuggingFace", e, slog)
-        else:
-            slog.warning("HUGGINGFACE_API_KEY not set — skipping fallback")
+            except Exception as exc:
+                status = _http_status(exc)
+                _mark_provider_failure(provider_name.lower(), status=status)
+                _log_error(provider_name, exc, slog)
 
-        yield (
-            "⚠️ All LLM providers are currently unavailable. "
-            "Please verify your API keys in the .env file. "
-            "OpenRouter key must start with 'sk-or-'. "
-            "HuggingFace token must have 'Make calls to Inference Providers' permission."
+        yield self._unavailable_message()
+
+    @staticmethod
+    def _unavailable_message() -> str:
+        return (
+            "⚠️ I couldn't reach the study AI right now. "
+            "Please try again in a moment."
         )
 
     def _stream_openrouter(
         self,
-        messages : list[dict],
-        slog     : ServiceLogger,
-        model    : str,
+        messages: list[dict],
+        slog: ServiceLogger,
+        model: str,
     ) -> Iterator[str]:
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             try:
                 resp = self.or_client.chat.completions.create(
-                    model      = model,
-                    messages   = messages,
-                    max_tokens = MAX_TOKENS,
-                    temperature= max(float(TEMPERATURE), 0.01),
-                    stream     = True,
+                    model=model,
+                    messages=messages,
+                    max_tokens=MAX_TOKENS,
+                    temperature=max(float(TEMPERATURE), 0.01),
+                    stream=True,
                 )
+
                 count = 0
                 for chunk in resp:
                     delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
+                    content = delta.content if delta else None
+                    if content:
                         count += 1
-                        yield delta.content
-                slog.info("OpenRouter stream done — %d tokens", count)
+                        yield content
+
+                slog.info("OpenRouter stream done — %d chunks", count)
+                if count:
+                    _mark_provider_success("openrouter")
                 return
 
-            except Exception as e:
-                status = _http_status(e)
-                if status == 429:
-                    wait = OPENROUTER_RATE_LIMIT_DELAY
-                    slog.warning(
-                        "OpenRouter 429 — waiting %.1fs (attempt %d/%d)",
-                        wait, attempt, RETRY_MAX_ATTEMPTS,
-                    )
-                    time.sleep(wait)
-                    if attempt >= RETRY_MAX_ATTEMPTS:
-                        raise
-                elif status and 400 <= status < 500:
-                    # Hard client error — no point retrying
-                    slog.error("OpenRouter HTTP %s: %s", status, _error_body(e))
+            except Exception as exc:
+                status = _http_status(exc)
+                if status in _PERMANENT_HTTP_ERRORS:
                     raise
-                elif attempt < RETRY_MAX_ATTEMPTS:
-                    delay = 2 ** (attempt - 1)
-                    slog.warning(
-                        "OpenRouter transient error attempt %d/%d: %s — retry in %ds",
-                        attempt, RETRY_MAX_ATTEMPTS, e, delay,
-                    )
-                    time.sleep(delay)
-                else:
+
+                if attempt >= RETRY_MAX_ATTEMPTS:
                     raise
+
+                delay = _retry_delay(attempt, base=1.0)
+                slog.warning(
+                    "OpenRouter transient error attempt %d/%d: %s — retry in %.1fs",
+                    attempt, RETRY_MAX_ATTEMPTS, _error_body(exc), delay,
+                )
+                time.sleep(delay)
 
     def _stream_groq(
         self,
-        messages : list[dict],
-        slog     : ServiceLogger,
+        messages: list[dict],
+        slog: ServiceLogger,
     ) -> Iterator[str]:
-        """Groq's API is OpenAI-compatible; error/retry shape mirrors
-        HuggingFace's handling below since both are standard
-        OpenAI-SDK-style 429/5xx semantics."""
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             try:
                 resp = self.groq_client.chat.completions.create(
-                    model      = GROQ_MODEL,
-                    messages   = messages,
-                    max_tokens = MAX_TOKENS,
-                    temperature= max(float(TEMPERATURE), 0.01),
-                    stream     = True,
+                    model=GROQ_MODEL,
+                    messages=messages,
+                    max_tokens=MAX_TOKENS,
+                    temperature=max(float(TEMPERATURE), 0.01),
+                    stream=True,
                 )
+
                 count = 0
                 for chunk in resp:
                     delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
+                    content = delta.content if delta else None
+                    if content:
                         count += 1
-                        yield delta.content
-                slog.info("Groq stream done — %d tokens", count)
+                        yield content
+
+                slog.info("Groq stream done — %d chunks", count)
+                if count:
+                    _mark_provider_success("groq")
                 return
 
-            except Exception as e:
-                status = _http_status(e)
-                if status == 429:
-                    slog.warning(
-                        "Groq 429 — waiting 10s (attempt %d/%d)",
-                        attempt, RETRY_MAX_ATTEMPTS,
-                    )
-                    time.sleep(10)
-                    if attempt >= RETRY_MAX_ATTEMPTS:
-                        raise
-                elif status and 400 <= status < 500:
-                    slog.error("Groq HTTP %s: %s", status, _error_body(e))
+            except Exception as exc:
+                status = _http_status(exc)
+                if status in _PERMANENT_HTTP_ERRORS:
                     raise
-                elif attempt < RETRY_MAX_ATTEMPTS:
-                    delay = 2 ** (attempt - 1)
-                    slog.warning(
-                        "Groq transient error attempt %d/%d: %s — retry in %ds",
-                        attempt, RETRY_MAX_ATTEMPTS, e, delay,
-                    )
-                    time.sleep(delay)
-                else:
+
+                if attempt >= RETRY_MAX_ATTEMPTS:
                     raise
+
+                delay = _retry_delay(attempt, base=1.0)
+                slog.warning(
+                    "Groq transient error attempt %d/%d: %s — retry in %.1fs",
+                    attempt, RETRY_MAX_ATTEMPTS, _error_body(exc), delay,
+                )
+                time.sleep(delay)
 
     def _stream_huggingface(
         self,
-        messages : list[dict],
-        slog     : ServiceLogger,
+        messages: list[dict],
+        slog: ServiceLogger,
     ) -> Iterator[str]:
-        """
-        HuggingFace Inference Providers router.
-        Model format: "org/model:provider" e.g. "meta-llama/Llama-3.1-8B-Instruct:cerebras"
-        Use ":auto" suffix to let HF auto-select the best available provider.
-        """
         for attempt in range(1, RETRY_MAX_ATTEMPTS + 1):
             try:
                 resp = self.hf_client.chat.completions.create(
-                    model      = HUGGINGFACE_MODEL,
-                    messages   = messages,
-                    max_tokens = MAX_TOKENS,
-                    temperature= max(float(TEMPERATURE), 0.01),
-                    stream     = True,
+                    model=HUGGINGFACE_MODEL,
+                    messages=messages,
+                    max_tokens=MAX_TOKENS,
+                    temperature=max(float(TEMPERATURE), 0.01),
+                    stream=True,
                 )
+
                 count = 0
                 for chunk in resp:
                     delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
+                    content = delta.content if delta else None
+                    if content:
                         count += 1
-                        yield delta.content
-                slog.info("HuggingFace stream done — %d tokens", count)
+                        yield content
+
+                slog.info("HuggingFace stream done — %d chunks", count)
+                if count:
+                    _mark_provider_success("huggingface")
                 return
 
-            except Exception as e:
-                status = _http_status(e)
-                body   = _error_body(e)
-                if status == 429:
-                    slog.warning(
-                        "HuggingFace 429 — waiting 15s (attempt %d/%d)",
-                        attempt, RETRY_MAX_ATTEMPTS,
-                    )
-                    time.sleep(15)
-                    if attempt >= RETRY_MAX_ATTEMPTS:
-                        raise
-                elif status == 503:
-                    slog.warning("HuggingFace 503 model loading — waiting 20s")
-                    time.sleep(20)
-                elif status == 401:
-                    slog.error(
-                        "HuggingFace 401 Unauthorized. "
-                        "Ensure your HF token has 'Make calls to Inference Providers' "
-                        "permission at huggingface.co/settings/tokens"
-                    )
-                    raise
-                elif status and 400 <= status < 500:
-                    slog.error("HuggingFace HTTP %s: %s", status, body)
-                    raise
-                elif attempt < RETRY_MAX_ATTEMPTS:
-                    delay = 2 ** (attempt - 1)
-                    slog.warning(
-                        "HuggingFace transient error attempt %d/%d: %s — retry in %ds",
-                        attempt, RETRY_MAX_ATTEMPTS, e, delay,
-                    )
-                    time.sleep(delay)
-                else:
+            except Exception as exc:
+                status = _http_status(exc)
+
+                if status in _PERMANENT_HTTP_ERRORS:
                     raise
 
-    # ── Non-streaming ─────────────────────────────────────────────────────────
+                if attempt >= RETRY_MAX_ATTEMPTS:
+                    raise
+
+                delay = _retry_delay(attempt, base=1.5)
+                slog.warning(
+                    "HuggingFace transient error attempt %d/%d: %s — retry in %.1fs",
+                    attempt, RETRY_MAX_ATTEMPTS, _error_body(exc), delay,
+                )
+                time.sleep(delay)
 
     def _complete_with_fallback(
         self,
-        messages : list[dict],
-        question : str,
-        doc_id   : str,
-        slog     : ServiceLogger,
-        model    : str,
+        messages: list[dict],
+        question: str,
+        doc_id: str,
+        slog: ServiceLogger,
+        model: str,
     ) -> ChatResponse:
-        start    = time.monotonic()
-        answer   = ""
-        provider = LLMProvider.OPENROUTER
-        model_u  = model
+        start = time.monotonic()
 
-        if OPENROUTER_API_KEY:
-            try:
-                answer   = self._complete_openrouter(messages, slog, model)
-                provider = LLMProvider.OPENROUTER
-            except Exception as e:
-                _log_error("OpenRouter", e, slog)
+        candidates = []
 
-        if not answer and GROQ_API_KEY:
-            try:
-                answer   = self._complete_groq(messages, slog)
-                provider = LLMProvider.GROQ
-                model_u  = GROQ_MODEL
-            except Exception as e:
-                _log_error("Groq", e, slog)
+        if OPENROUTER_API_KEY and _provider_is_available("openrouter"):
+            candidates.append(
+                ("openrouter", LLMProvider.OPENROUTER, model, self._complete_openrouter)
+            )
 
-        if not answer and HUGGINGFACE_API_KEY:
+        if GROQ_API_KEY and _provider_is_available("groq"):
+            candidates.append(
+                ("groq", LLMProvider.GROQ, GROQ_MODEL, self._complete_groq)
+            )
+
+        if HUGGINGFACE_API_KEY and _provider_is_available("huggingface"):
+            candidates.append(
+                ("huggingface", LLMProvider.HUGGINGFACE, HUGGINGFACE_MODEL, self._complete_huggingface)
+            )
+
+        if not candidates:
+            return ChatResponse(
+                answer=self._unavailable_message(),
+                doc_id=doc_id,
+                question=question,
+                provider=LLMProvider.OPENROUTER,
+                model=model,
+                response_time_ms=round((time.monotonic() - start) * 1000, 2),
+            )
+
+        for provider_name, provider_enum, provider_model, call in candidates:
+            provider_started = time.monotonic()
             try:
-                answer   = self._complete_huggingface(messages, slog)
-                provider = LLMProvider.HUGGINGFACE
-                model_u  = HUGGINGFACE_MODEL
-            except Exception as e:
-                _log_error("HuggingFace", e, slog)
-                answer   = (
-                    "⚠️ All LLM providers failed. "
-                    "Check your API keys and model availability."
+                answer = (call(messages, slog) or "").strip()
+
+                if answer:
+                    _mark_provider_success(provider_name)
+                    slog.info(
+                        "%s selected — chars=%d elapsed=%.1fs",
+                        provider_name,
+                        len(answer),
+                        time.monotonic() - provider_started,
+                    )
+                    return ChatResponse(
+                        answer=answer,
+                        doc_id=doc_id,
+                        question=question,
+                        provider=provider_enum,
+                        model=provider_model,
+                        response_time_ms=round(
+                            (time.monotonic() - start) * 1000, 2
+                        ),
+                    )
+
+                slog.warning(
+                    "%s returned empty content — trying next provider",
+                    provider_name,
                 )
+                _mark_provider_failure(provider_name)
+
+            except Exception as exc:
+                status = _http_status(exc)
+                _mark_provider_failure(provider_name, status=status)
+                _log_error(provider_name, exc, slog)
 
         return ChatResponse(
-            answer           = answer,
-            doc_id           = doc_id,
-            question         = question,
-            provider         = provider,
-            model            = model_u,
-            response_time_ms = round((time.monotonic() - start) * 1000, 2),
+            answer=self._unavailable_message(),
+            doc_id=doc_id,
+            question=question,
+            provider=LLMProvider.OPENROUTER,
+            model=model,
+            response_time_ms=round((time.monotonic() - start) * 1000, 2),
         )
 
     def _complete_openrouter(
         self, messages: list[dict], slog: ServiceLogger, model: str
     ) -> str:
-        resp   = self.or_client.chat.completions.create(
-            model      = model,
-            messages   = messages,
-            max_tokens = MAX_TOKENS,
-            temperature= max(float(TEMPERATURE), 0.01),
-            stream     = False,
+        resp = self.or_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=MAX_TOKENS,
+            temperature=max(float(TEMPERATURE), 0.01),
+            stream=False,
+            timeout=OPENROUTER_TIMEOUT,
         )
         answer = resp.choices[0].message.content or ""
         slog.info("OpenRouter complete ✓ — %d chars", len(answer))
@@ -598,12 +747,13 @@ class AIRouter:
     def _complete_groq(
         self, messages: list[dict], slog: ServiceLogger
     ) -> str:
-        resp   = self.groq_client.chat.completions.create(
-            model      = GROQ_MODEL,
-            messages   = messages,
-            max_tokens = MAX_TOKENS,
-            temperature= max(float(TEMPERATURE), 0.01),
-            stream     = False,
+        resp = self.groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            max_tokens=MAX_TOKENS,
+            temperature=max(float(TEMPERATURE), 0.01),
+            stream=False,
+            timeout=GROQ_TIMEOUT,
         )
         answer = resp.choices[0].message.content or ""
         slog.info("Groq complete ✓ — %d chars", len(answer))
@@ -612,12 +762,13 @@ class AIRouter:
     def _complete_huggingface(
         self, messages: list[dict], slog: ServiceLogger
     ) -> str:
-        resp   = self.hf_client.chat.completions.create(
-            model      = HUGGINGFACE_MODEL,
-            messages   = messages,
-            max_tokens = MAX_TOKENS,
-            temperature= max(float(TEMPERATURE), 0.01),
-            stream     = False,
+        resp = self.hf_client.chat.completions.create(
+            model=HUGGINGFACE_MODEL,
+            messages=messages,
+            max_tokens=MAX_TOKENS,
+            temperature=max(float(TEMPERATURE), 0.01),
+            stream=False,
+            timeout=HUGGINGFACE_TIMEOUT,
         )
         answer = resp.choices[0].message.content or ""
         slog.info("HuggingFace complete ✓ — %d chars", len(answer))
@@ -659,22 +810,44 @@ class AIRouter:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _trim_history(
-    history   : list[ChatMessage],
-    max_chars : int = CONTEXT_WINDOW_TOKENS * 3,
+    history: list[ChatMessage],
+    max_chars: int = CONTEXT_WINDOW_TOKENS * 3,
 ) -> list[ChatMessage]:
-    trimmed     = list(history)
-    total_chars = sum(len(m.content) for m in trimmed)
-    while total_chars > max_chars and len(trimmed) > 2:
-        removed      = trimmed.pop(0)
-        total_chars -= len(removed.content)
+    """Keep the newest conversational context without blowing the prompt budget."""
+    if not history:
+        return []
+
+    trimmed: list[ChatMessage] = []
+    total_chars = 0
+
+    # Walk backwards so recent turns always survive.
+    for msg in reversed(history):
+        content_len = len(msg.content or "")
+        if trimmed and total_chars + content_len > max_chars:
+            break
+        trimmed.append(msg)
+        total_chars += content_len
+
+    trimmed.reverse()
     return trimmed
 
 
 def _http_status(exc: Exception) -> int | None:
-    if hasattr(exc, "status_code"):
-        return int(exc.status_code)
-    if hasattr(exc, "response") and exc.response is not None:
-        return int(exc.response.status_code)
+    try:
+        status = getattr(exc, "status_code", None)
+        if status is not None:
+            return int(status)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            return int(status)
+    except (TypeError, ValueError):
+        pass
+
     return None
 
 
