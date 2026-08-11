@@ -41,9 +41,10 @@ Improvements over v1:
 
   OCR
     • Adaptive thresholding (Otsu) before tesseract
-    • Deskew pass using scipy rotate (if available)
-    • psm 3 (auto-detect) preferred over psm 6; psm 6 fallback
-    • Higher DPI default (350) for body pages
+    • Optional downsampled deskew pass using scipy rotate
+    • psm 3 first; psm 6 only when psm 3 confidence is low
+    • Tesseract timeout + document OCR page cap
+    • Lower body-page DPI default for Render CPU efficiency
 
   Chunking
     • Minimum sentence length filter (< 8 chars dropped)
@@ -59,7 +60,9 @@ Improvements over v1:
 
 from __future__ import annotations
 
+import os
 import re
+import time
 import uuid
 from collections import Counter
 from html import unescape
@@ -97,6 +100,21 @@ from app.models.schemas import (
 from app.utils.logger import get_logger, ServiceLogger
 
 logger = get_logger(__name__)
+
+
+# ── OCR / extraction safety limits ──────────────────────────────────────────
+# Override these with Render environment variables when needed.
+EXTRACTION_TIMEOUT_SECONDS = max(60, int(os.getenv("EXTRACTION_TIMEOUT_SECONDS", "900")))
+OCR_MAX_PAGES_PER_DOC = max(1, int(os.getenv("OCR_MAX_PAGES_PER_DOC", "40")))
+OCR_DPI_FIRST_PAGE = max(150, int(os.getenv("OCR_DPI_FIRST_PAGE", "350")))
+OCR_DPI_BODY = max(150, int(os.getenv("OCR_DPI_BODY", "300")))
+OCR_DESKEW_ENABLED = os.getenv("OCR_DESKEW_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+OCR_DESKEW_MAX_DIM = max(600, int(os.getenv("OCR_DESKEW_MAX_DIM", "1600")))
+TESSERACT_TIMEOUT_SECONDS = max(5, int(os.getenv("TESSERACT_TIMEOUT_SECONDS", "45")))
+VISION_OCR_TIMEOUT_SECONDS = max(5, int(os.getenv("VISION_OCR_TIMEOUT_SECONDS", "60")))
+OCR_PROGRESS_EVERY = max(1, int(os.getenv("OCR_PROGRESS_EVERY", "1")))
 
 
 # ── Unicode / ligature normalisation ─────────────────────────────────────────
@@ -293,6 +311,9 @@ class ExtractionService:
         page0_blocks:  list[dict]  = []
         total_words    = 0
         ocr_page_count = 0
+        ocr_pages_attempted = 0
+        extraction_started = time.monotonic()
+        extraction_deadline = extraction_started + EXTRACTION_TIMEOUT_SECONDS
 
         fitz = _get_fitz_module()
 
@@ -322,22 +343,58 @@ class ExtractionService:
                             if sz > 0:
                                 font_sizes.append(sz)
 
-            # Extract text page by page with OCR fallback
+            # Extract text page by page with OCR fallback.
             ocr_available = _check_ocr()
             vision_ocr_used = 0
             raw_pages: list[str] = []
-            for pn in range(page_count):
-                raw_text = pdf[pn].get_text("text").strip()
+            ocr_cap_warned = False
 
-                if len(raw_text) < 50 and ocr_available:
-                    ocr_text, ocr_confidence, page_image_bytes = _ocr_page_with_confidence(
-                        pdf_bytes, pn, dpi=350 if pn > 0 else 400
+            slog.info(
+                "Extraction started: %d pages | OCR=%s | OCR page cap=%d | timeout=%ds",
+                page_count, ocr_available, OCR_MAX_PAGES_PER_DOC,
+                EXTRACTION_TIMEOUT_SECONDS,
+            )
+
+            for pn in range(page_count):
+                if time.monotonic() >= extraction_deadline:
+                    raise TimeoutError(
+                        f"Extraction timeout after {int(time.monotonic() - extraction_started)}s "
+                        f"({pn}/{page_count} pages processed; {ocr_page_count} OCR pages)"
                     )
 
-                    # Tesseract can emit confident-*looking* garbage on
-                    # handwriting/math it can't actually read - its own
-                    # mean word confidence is the signal for "should I
-                    # trust this," not just whether it produced any text.
+                raw_text = pdf[pn].get_text("text").strip()
+                needs_ocr = len(raw_text) < 50 and ocr_available
+
+                if needs_ocr and ocr_pages_attempted >= OCR_MAX_PAGES_PER_DOC:
+                    if not ocr_cap_warned:
+                        slog.warning(
+                            "OCR page cap (%d) reached; remaining scanned pages "
+                            "will keep their extracted text as-is",
+                            OCR_MAX_PAGES_PER_DOC,
+                        )
+                        ocr_cap_warned = True
+                    text = self._clean_page_text(raw_text)
+
+                elif needs_ocr:
+                    ocr_pages_attempted += 1
+                    dpi = OCR_DPI_FIRST_PAGE if pn == 0 else OCR_DPI_BODY
+
+                    slog.info(
+                        "Page %d/%d: OCR starting (%d/%d OCR pages, dpi=%d)",
+                        pn + 1, page_count, ocr_pages_attempted,
+                        OCR_MAX_PAGES_PER_DOC, dpi,
+                    )
+
+                    ocr_started = time.monotonic()
+                    ocr_text, ocr_confidence, page_image_bytes = _ocr_page_with_confidence(
+                        pdf_bytes, pn, dpi=dpi, deadline=extraction_deadline
+                    )
+                    slog.info(
+                        "Page %d/%d: Tesseract finished in %.1fs, confidence=%.0f%%, chars=%d",
+                        pn + 1, page_count, time.monotonic() - ocr_started,
+                        ocr_confidence, len(ocr_text),
+                    )
+
                     if (
                         VISION_OCR_ENABLED
                         and ocr_confidence < VISION_OCR_CONFIDENCE_THRESHOLD
@@ -347,7 +404,14 @@ class ExtractionService:
                         from app.services.ai_router import ai_router
 
                         vision_ocr_used += 1
-                        vision_text = ai_router.transcribe_image(
+                        slog.info(
+                            "Page %d/%d: vision OCR starting (%d/%d vision pages)",
+                            pn + 1, page_count, vision_ocr_used,
+                            VISION_OCR_MAX_PAGES_PER_DOC,
+                        )
+
+                        vision_text = _transcribe_image_with_timeout(
+                            ai_router,
                             page_image_bytes,
                             prompt=(
                                 "Transcribe all text on this page exactly as written, including "
@@ -356,26 +420,37 @@ class ExtractionService:
                                 "Output only the transcription, no commentary."
                             ),
                             doc_id=f"ocr-page-{pn + 1}",
+                            timeout_seconds=min(
+                                VISION_OCR_TIMEOUT_SECONDS,
+                                max(1, int(extraction_deadline - time.monotonic())),
+                            ),
                         )
+
                         if vision_text:
-                            slog.debug(
-                                "Page %d: Tesseract confidence %.0f%% too low, used vision OCR instead (%d chars)",
-                                pn + 1, ocr_confidence, len(vision_text),
+                            slog.info(
+                                "Page %d/%d: vision OCR finished (%d chars)",
+                                pn + 1, page_count, len(vision_text),
                             )
                             ocr_text = vision_text
-                        elif vision_ocr_used >= VISION_OCR_MAX_PAGES_PER_DOC:
+                        else:
                             slog.warning(
-                                "Vision OCR page cap (%d) reached for this document - "
-                                "remaining low-confidence pages keep Tesseract's output as-is",
-                                VISION_OCR_MAX_PAGES_PER_DOC,
+                                "Page %d/%d: vision OCR returned no text or timed out; "
+                                "keeping Tesseract output",
+                                pn + 1, page_count,
                             )
 
                     text = self._clean_page_text(ocr_text)
                     if text:
                         ocr_page_count += 1
-                        slog.debug("Page %d: OCR (%d chars)", pn + 1, len(text))
                     else:
                         text = self._clean_page_text(raw_text)
+
+                    if (pn + 1) % OCR_PROGRESS_EVERY == 0 or pn == page_count - 1:
+                        slog.info(
+                            "Extraction progress: %d/%d pages | OCR=%d | elapsed=%ds",
+                            pn + 1, page_count, ocr_page_count,
+                            int(time.monotonic() - extraction_started),
+                        )
                 else:
                     text = self._clean_page_text(raw_text)
 
@@ -390,7 +465,11 @@ class ExtractionService:
         first3 = "\n".join(pages_text[:3])
         full   = "\n".join(pages_text)
 
-        slog.info("OCR: %d/%d pages via OCR", ocr_page_count, page_count)
+        slog.info(
+            "OCR: %d/%d pages via OCR | vision=%d | elapsed=%ds",
+            ocr_page_count, page_count, vision_ocr_used,
+            int(time.monotonic() - extraction_started),
+        )
 
         # ── Resolve all metadata ──────────────────────────────────────────────
         title          = self._resolve_title(meta_title, page0_blocks, pages_text)
@@ -776,106 +855,218 @@ class ExtractionService:
 # OCR helper
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _ocr_page_with_confidence(pdf_bytes: bytes, page_number: int, dpi: int = 350) -> tuple[str, float, bytes]:
-    """
-    Run OCR on a single PDF page with improved preprocessing, and also
-    report Tesseract's own mean confidence for the result (0-100).
-    Pipeline: render → grayscale → deskew (optional) → Otsu threshold → tesseract
-
-    Also returns the *original* rendered page as PNG bytes (before Otsu
-    binarization, which throws away detail Tesseract doesn't need but a
-    vision model reading handwriting benefits from) - this is what gets
-    sent to the vision-OCR fallback in extraction_service.process() when
-    Tesseract's confidence on this page is too low to trust.
-
-    Confidence is Tesseract's own signal, not a text-length heuristic:
-    Tesseract will happily emit a confident-looking string of wrong
-    characters for handwriting it can't actually read, so "did it
-    produce non-empty text" doesn't tell you whether that text is
-    trustworthy. Mean word confidence does.
-    """
+def _ocr_page_with_confidence(
+    pdf_bytes: bytes,
+    page_number: int,
+    dpi: int = 300,
+    deadline: float | None = None,
+) -> tuple[str, float, bytes]:
+    """OCR one page with bounded work suitable for small Render CPU instances."""
     try:
+        import io
+        import numpy as np
         import pytesseract
         from pdf2image import convert_from_bytes
         from PIL import Image
-        import io
 
+        def check_deadline() -> None:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"OCR deadline reached on page {page_number + 1}"
+                )
+
+        check_deadline()
         images = convert_from_bytes(
             pdf_bytes,
-            dpi          = dpi,
-            first_page   = page_number + 1,
-            last_page    = page_number + 1,
-            fmt          = "PNG",
-            thread_count = 2,
+            dpi=dpi,
+            first_page=page_number + 1,
+            last_page=page_number + 1,
+            fmt="PNG",
+            thread_count=1,
         )
         if not images:
             return "", 0.0, b""
 
+        check_deadline()
+
         original_buf = io.BytesIO()
-        images[0].save(original_buf, format="PNG")
+        images[0].save(original_buf, format="PNG", optimize=True)
         original_png_bytes = original_buf.getvalue()
 
-        img = images[0].convert("L")  # grayscale
+        img = images[0].convert("L")
+        if OCR_DESKEW_ENABLED:
+            img = _deskew(img)
 
-        # Deskew if scipy is available
-        img = _deskew(img)
+        check_deadline()
 
-        # Otsu binarisation for cleaner text
-        import numpy as np
         arr = np.array(img)
         thresh = _otsu_threshold(arr)
-        arr = (arr > thresh).astype(np.uint8) * 255
-        img = Image.fromarray(arr)
+        img = Image.fromarray((arr > thresh).astype(np.uint8) * 255)
 
-        # Try psm 3 (fully auto), fall back to psm 6 (uniform block)
-        best_text, best_confidence = "", 0.0
-        for psm in (3, 6):
+        def run_tesseract(psm: int) -> tuple[str, float]:
+            check_deadline()
+            timeout = min(
+                TESSERACT_TIMEOUT_SECONDS,
+                max(1, int(deadline - time.monotonic()))
+                if deadline is not None else TESSERACT_TIMEOUT_SECONDS,
+            )
             config = f"--oem 3 --psm {psm} -l eng"
+
+            ocr_text = pytesseract.image_to_string(
+                img, config=config, timeout=timeout
+            )
+            if not ocr_text.strip():
+                return "", 0.0
+
+            data = pytesseract.image_to_data(
+                img,
+                config=config,
+                output_type=pytesseract.Output.DICT,
+                timeout=timeout,
+            )
+            confidences = []
+            for value in data.get("conf", []):
+                try:
+                    value = float(value)
+                    if value >= 0:
+                        confidences.append(value)
+                except (TypeError, ValueError):
+                    pass
+
+            mean_conf = (
+                sum(confidences) / len(confidences)
+                if confidences else 0.0
+            )
+            return ocr_text, mean_conf
+
+        best_text, best_confidence = "", 0.0
+
+        try:
+            best_text, best_confidence = run_tesseract(3)
+        except Exception as exc:
+            logger.warning(
+                "Tesseract psm 3 failed for page %d: %s",
+                page_number + 1, exc,
+            )
+
+        # Only pay for psm 6 when psm 3 actually looks weak.
+        if best_confidence < 65.0:
             try:
-                text = pytesseract.image_to_string(img, config=config)
-                if not text.strip():
-                    continue
-                data = pytesseract.image_to_data(img, config=config, output_type=pytesseract.Output.DICT)
-                confidences = [c for c in data.get("conf", []) if isinstance(c, (int, float)) and c >= 0]
-                mean_conf = (sum(confidences) / len(confidences)) if confidences else 0.0
-                if mean_conf >= best_confidence:
-                    best_text, best_confidence = text, mean_conf
-            except Exception:
-                continue
+                fallback_text, fallback_confidence = run_tesseract(6)
+                if fallback_confidence > best_confidence:
+                    best_text, best_confidence = (
+                        fallback_text, fallback_confidence
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Tesseract psm 6 failed for page %d: %s",
+                    page_number + 1, exc,
+                )
 
         return best_text, best_confidence, original_png_bytes
 
-    except Exception as e:
-        logger.warning("OCR failed for page %d: %s", page_number + 1, e)
+    except TimeoutError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "OCR failed for page %d: %s", page_number + 1, exc
+        )
         return "", 0.0, b""
 
 
 def _deskew(img) -> "Image":
-    """Attempt to deskew an image using scipy if available."""
+    """
+    Cheap optional deskew: estimate angle on a downsampled copy, then rotate
+    the original once. Disabled by default because the previous 11 full-size
+    scipy rotations were a major CPU bottleneck.
+    """
     try:
         import numpy as np
+        from PIL import Image
         from scipy.ndimage import rotate
-        arr   = np.array(img)
-        edges = np.where(arr < 128)
-        if len(edges[0]) < 100:
-            return img
-        # Simple skew estimate via projection profile minimisation
+
+        original = img
+        work = img.copy()
+        max_dim = max(work.size)
+
+        if max_dim > OCR_DESKEW_MAX_DIM:
+            scale = OCR_DESKEW_MAX_DIM / max_dim
+            work = work.resize(
+                (
+                    max(1, int(work.width * scale)),
+                    max(1, int(work.height * scale)),
+                ),
+                Image.Resampling.BILINEAR,
+            )
+
+        arr = np.array(work)
+        if np.count_nonzero(arr < 128) < 100:
+            return original
+
         best_angle = 0.0
-        best_score = float("inf")
-        for angle in range(-5, 6):
-            rotated = rotate(arr, angle, reshape=False, cval=255)
-            # Score: sum of variance in each row (low variance = aligned text)
-            score = float(np.sum(np.var(rotated, axis=1)))
-            if score < best_score:
+        best_score = float("-inf")
+
+        for angle in (-3, -2, -1, 0, 1, 2, 3):
+            rotated = rotate(
+                arr, angle, reshape=False, cval=255,
+                order=1, prefilter=False,
+            )
+            darkness = 255.0 - rotated
+            projection = np.sum(darkness, axis=1)
+            score = float(np.var(projection))
+            if score > best_score:
                 best_score = score
                 best_angle = angle
-        if best_angle != 0:
-            arr = rotate(arr, best_angle, reshape=False, cval=255).astype("uint8")
-            from PIL import Image
-            return Image.fromarray(arr)
+
+        if best_angle == 0:
+            return original
+
+        corrected = rotate(
+            np.array(original), best_angle, reshape=False, cval=255,
+            order=1, prefilter=False,
+        ).astype("uint8")
+        return Image.fromarray(corrected)
+
     except Exception:
-        pass
-    return img
+        return img
+
+
+def _transcribe_image_with_timeout(
+    ai_router,
+    image_bytes: bytes,
+    *,
+    prompt: str,
+    doc_id: str,
+    timeout_seconds: int,
+) -> str:
+    """Prevent a stuck vision provider from blocking extraction forever."""
+    if timeout_seconds <= 0:
+        return ""
+
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(
+        ai_router.transcribe_image,
+        image_bytes,
+        prompt=prompt,
+        doc_id=doc_id,
+    )
+    try:
+        return future.result(timeout=timeout_seconds) or ""
+    except FutureTimeout:
+        future.cancel()
+        logger.warning(
+            "Vision OCR timed out after %ds for %s",
+            timeout_seconds, doc_id,
+        )
+        return ""
+    except Exception as exc:
+        logger.warning("Vision OCR failed for %s: %s", doc_id, exc)
+        return ""
+    finally:
+        # Do not wait for a stuck network request during extraction shutdown.
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _otsu_threshold(arr) -> int:
