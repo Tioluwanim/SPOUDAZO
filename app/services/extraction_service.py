@@ -972,10 +972,32 @@ def _ocr_page_isolated(
             pass
 
 
+
+OCR_MAX_PIXELS = 18_000_000
+OCR_DESKEW_MAX_PIXELS = 3_000_000
+OCR_VISION_ENABLED = os.getenv("OCR_VISION_ENABLED", "false").lower() == "true"
+
+
+def _cap_ocr_image_size(image):
+    """Keep OCR preprocessing bounded on low-CPU Render instances."""
+    width, height = image.size
+    pixels = width * height
+    if pixels <= OCR_MAX_PIXELS:
+        return image
+
+    scale = (OCR_MAX_PIXELS / pixels) ** 0.5
+    return image.resize(
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        resample=2,
+    )
+
+
 def _ocr_page_worker(queue, pdf_bytes: bytes, page_number: int, dpi: int) -> None:
     """Child-process OCR implementation."""
     slog = ServiceLogger("extraction_service")
     try:
+        # Prevent pathological render sizes from consuming the entire worker.
+        # The OCR DPI is already intentionally conservative.
         import base64
         import io
 
