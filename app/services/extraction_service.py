@@ -914,6 +914,7 @@ def _ocr_page_isolated(
     import base64
     import multiprocessing as mp
 
+    slog = ServiceLogger("extraction_service")
     ctx = mp.get_context("fork" if sys.platform != "win32" else "spawn")
     queue = ctx.Queue(maxsize=1)
     process = ctx.Process(
@@ -973,6 +974,7 @@ def _ocr_page_isolated(
 
 def _ocr_page_worker(queue, pdf_bytes: bytes, page_number: int, dpi: int) -> None:
     """Child-process OCR implementation."""
+    slog = ServiceLogger("extraction_service")
     try:
         import base64
         import io
