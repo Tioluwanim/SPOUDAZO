@@ -66,7 +66,6 @@ from html import unescape
 from pathlib import Path
 from typing import Optional
 from app.services.pdf_service import pdf_service
-from app.services.ai_router import ai_router
 from app.config import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
@@ -345,6 +344,8 @@ class ExtractionService:
                         and page_image_bytes
                         and vision_ocr_used < VISION_OCR_MAX_PAGES_PER_DOC
                     ):
+                        from app.services.ai_router import ai_router
+
                         vision_ocr_used += 1
                         vision_text = ai_router.transcribe_image(
                             page_image_bytes,
